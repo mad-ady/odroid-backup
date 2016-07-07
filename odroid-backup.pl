@@ -41,7 +41,7 @@ sub getRemovableDisks{
             if($line=~/ATTRS\{model\}==\"(.*)\"/){
                 $model = $1;
             }
-            if($line=~/ATTRS\{removable\}==\"(.*)\"/){
+            if($line=~/ATTR\{removable\}==\"(.*)\"/){
                 $removable = $1;
             }
         }

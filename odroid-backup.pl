@@ -14,6 +14,7 @@ my %dependencies = (
 'fsarchiver' => 'sudo apt-get install fsarchiver',
 'udevadm' => 'sudo apt-get install udev',
 'blockdev' => 'sudo apt-get install util-linux',
+'blkid' => 'sudo apt-get install util-linux',
 );
 
 GetOptions(\%options, 'help|h', 'allDisks|a');
@@ -30,6 +31,8 @@ Options
 }
 checkDependencies();
 checkUser();
+
+my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
 
 my $mainOperation = $dialog->radiolist(title => "Odroid Backup", text => "Please select if you want to perform a backup or a restore:", 
                     list => [   'backup', [ 'Backup partitions', 1],
@@ -55,15 +58,168 @@ if($mainOperation eq 'backup'){
                     list => \@displayedDisks);
     
     print $selectedDisk;
+    
+    if($selectedDisk){
+        #get a list of partitions from the disk and their type
+        my %partitions = getPartitions($selectedDisk);
+        print Dumper(\%partitions);
+        
+        #convert the partitions hash to an array the way checklist expects
+        my @displayedPartitions = ();
+        foreach my $part (sort keys %partitions){
+            push @displayedPartitions, $part;
+            my $description = "";
+            if(defined $partitions{$part}{label}){
+                $description.="$partitions{$part}{label}, ";
+            }
+            $description.="$partitions{$part}{sizeHuman}, ";
+            
+            if(defined $partitions{$part}{literalType}){
+                $description.="$partitions{$part}{literalType} ($partitions{$part}{type}), ";
+            }
+            else{
+                $description.="type $partitions{$part}{type}, ";
+            }
+            
+            if(defined $partitions{$part}{mounted}){
+                $description.="mounted on $partitions{$part}{mounted}, ";
+            }
+            
+            if(defined $partitions{$part}{uuid}){
+                $description.="UUID $partitions{$part}{uuid}, ";
+            }
+            
+            $description.="start sector $partitions{$part}{start}";
+            my @content =  ( $description, 0 );
+            push @displayedPartitions, \@content;
+        }
+        
+        #create a checkbox selector that allows users to select what they want to backup
+        my @selectedPartitions = $dialog->checklist(text => "Please select the partitions you want to back-up",
+                    list => \@displayedPartitions);
+        print join(",", @selectedPartitions);
+        
+        if(scalar(@selectedPartitions)){
+            #select a destination directory to dump to
+            
+            my $status = "";
+            foreach my $partition (@selectedPartitions){
+                if($partition eq 'mbr'){
+                    #we use sfdisk to dump mbr
+                }
+                elsif($partition eq 'bootloader'){
+                    #we use dd to dump bootloader
+                    
+                }
+                else{
+                    #regular partition. Based on the filesystem we dump it either with fsarchiver or partimage
+                }
+                
+            }
+        }
+        else{
+            $dialog->msgbox(title => "Odroid Backup error", text => "No partitions selected for backup. Program will close");
+        }
+        
+    }
+    else{
+            $dialog->msgbox(title => "Odroid Backup error", text => "No disks selected for backup. Program will close");
+    }
 }
 if($mainOperation eq 'restore'){
     
 }
 
+sub getPartitions{
+    #get a list of partitions of a specified disk
+    my $disk = shift;
+    my $jsonData = `$bin{sfdisk} -l -J /dev/$disk`;
+    print Dumper($jsonData);
+    
+    my %partitions = ();
+    
+    my %mounted = getMountedPartitions();
+    
+    if($jsonData){
+        my $json = JSON->new->allow_nonref;
+        my $sfdisk = $json->decode($jsonData);
+        print Dumper($sfdisk);
+        
+        if(defined $sfdisk->{partitiontable}{partitions}){
+            #add the MBR + EBR entry
+            $partitions{'mbr'}{'start'} = 0;
+            $partitions{'mbr'}{'type'} = 0;
+            $partitions{'mbr'}{'size'} = 512;
+            $partitions{'mbr'}{'sizeHuman'} = 512;
+            $partitions{'mbr'}{'label'} = "MBR+EBR";
+            
+            #we need to find out where the first partition starts
+            my $minOffset = 999_999_999_999;
+            
+            #list partitions from sfdisk + get their type
+            foreach my $part (@{$sfdisk->{partitiontable}{partitions}}){
+                $partitions{$part->{node}}{'start'} = $part->{start};
+                $partitions{$part->{node}}{'type'} = $part->{type};
+                my $size = getDiskSize($part->{node});
+                $partitions{$part->{node}}{'size'} = $size;
+                $partitions{$part->{node}}{'sizeHuman'} = $human->format($size);
+                #also get UUID and maybe label from blkid
+                my $output = `$bin{blkid} $part->{node}`;
+                if($output=~/\s+UUID=\"([^\"]+)\"/){
+                    $partitions{$part->{node}}{'uuid'} = $1;
+                }
+                if($output=~/\s+LABEL=\"([^\"]+)\"/){
+                    $partitions{$part->{node}}{'label'} = $1;
+                }
+                if($output=~/\s+TYPE=\"([^\"]+)\"/){
+                    $partitions{$part->{node}}{'literalType'} = $1;
+                }
+                
+                #find out if the filesystem is mounted from /proc/mounts
+                if(defined $mounted{$part->{node}}){
+                    $partitions{$part->{node}}{'mounted'} = $mounted{$part->{node}};
+                }
+                
+                $minOffset = $part->{start} if($minOffset > $part->{start});
+            }
+            
+            #add the bootloader entry - starting from MBR up to the first partition start offset
+            #We assume a sector size of 512 bytes - possible source of bugs
+            $partitions{'bootloader'}{'start'} = 1;
+            $partitions{'bootloader'}{'end'} = $minOffset;
+            $partitions{'bootloader'}{'type'} = 0;
+            $partitions{'bootloader'}{'size'} = ($minOffset - 1)*512;
+            $partitions{'bootloader'}{'sizeHuman'} = $human->format($partitions{'bootloader'}{'size'});
+            $partitions{'bootloader'}{'label'} = "Bootloader";
+            
+        }
+        else{
+            #no partitions on device?
+            $partitions{"error"}{'label'} = "Error - did not find any partitions on device!";
+        }
+    }
+    else{
+        #error running sfdisk
+        $partitions{"error"}{'label'} = "Error running sfdisk. No medium?";
+    }
+    return %partitions;
+}
+
+sub getMountedPartitions{
+    open MOUNTS, "/proc/mounts" or die "Unable to open /proc/mounts. $!";
+    my %filesystems = ();
+    while(<MOUNTS>){
+        if(/^(\/dev\/[^\s]+)\s+([^\s]+)\s+/){
+            $filesystems{$1}=$2;
+        }
+    }
+    close MOUNTS;
+    return %filesystems;
+}
+
 sub getRemovableDisks{
     opendir(my $dh, "/sys/block/") || die "Can't opendir /sys/block: $!";
     my %disks=();
-    my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
     while (readdir $dh) {
         my $block = $_;
         next if ($block eq '.' || $block eq '..');
@@ -97,7 +253,10 @@ sub getRemovableDisks{
 
 sub getDiskSize{
     my $disk = shift;
-    my $size = `$bin{blockdev} --getsize64 /dev/$disk`;
+    $disk = "/dev/$disk" if($disk !~ /^\/dev\//);
+    print Dumper(\$disk);
+    my $size = `$bin{blockdev} --getsize64 $disk`;
+    $size=~s/\r|\n//g;
     return $size;
 }
 
@@ -138,6 +297,14 @@ sub checkDependencies{
     
     if(!$readable){
         $message .= "Number::Bytes::Human missing - You can install it with sudo apt-get install libnumber-bytes-human-perl\n";
+    }
+    
+    my $json = eval{
+        require JSON;
+        1;
+    };
+    if(!$json){
+        $message .= "JSON missing - You can install it with sudo apt-get install libjson-perl\n";
     }
     
     #check if system binaries are available

@@ -17,7 +17,17 @@ my %dependencies = (
 );
 
 GetOptions(\%options, 'help|h', 'allDisks|a');
+if(defined $options{help}){
+    print "Odroid Backup program\n
+Usage $0 options
+Options
 
+--help|-h       Print this message
+--allDisks|-a   Display all disks in the selector (by default only removable disks are shown)
+
+";
+    exit 0;
+}
 checkDependencies();
 checkUser();
 
@@ -35,7 +45,7 @@ if($mainOperation eq 'backup'){
     my @displayedDisks = ();
     foreach my $disk (sort keys %disks){
         push @displayedDisks, $disk;
-        my @content =  ( "$disks{$disk}{model}, $disks{$disk}{size}, $disks{$disk}{removable}", 0 );
+        my @content =  ( "$disks{$disk}{model}, $disks{$disk}{sizeHuman}, $disks{$disk}{removable}", 0 );
         push @displayedDisks, \@content;
     }
     
@@ -53,7 +63,7 @@ if($mainOperation eq 'restore'){
 sub getRemovableDisks{
     opendir(my $dh, "/sys/block/") || die "Can't opendir /sys/block: $!";
     my %disks=();
-    my $human = Number::Bytes::Human->new(bs => 1000, si => 1);
+    my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
     while (readdir $dh) {
         my $block = $_;
         next if ($block eq '.' || $block eq '..');
@@ -72,7 +82,9 @@ sub getRemovableDisks{
             }
         }
         if(defined $options{'allDisks'} || $removable eq 'removable'){
-            $disks{$block}{size} = $human->format(getDiskSize($block));
+            my $size = getDiskSize($block);
+            $disks{$block}{sizeHuman} = $human->format($size);
+            $disks{$block}{size} = $size;
             $disks{$block}{model} = $model;
             $disks{$block}{removable} = $removable;
             

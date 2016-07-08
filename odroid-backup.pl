@@ -15,7 +15,12 @@ my %dependencies = (
 'udevadm' => 'sudo apt-get install udev',
 'blockdev' => 'sudo apt-get install util-linux',
 'blkid' => 'sudo apt-get install util-linux',
+'dd' => 'sudo apt-get install coreutils',
+'partclone.vfat' => 'sudo apt-get install partclone',
+'partclone.info' => 'sudo apt-get install partclone',
 );
+
+my $logfile = '/var/log/odroid-backup.log';
 
 GetOptions(\%options, 'help|h', 'allDisks|a');
 if(defined $options{help}){
@@ -99,22 +104,88 @@ if($mainOperation eq 'backup'){
                     list => \@displayedPartitions);
         print join(",", @selectedPartitions);
         
-        if(scalar(@selectedPartitions)){
+        if(scalar(@selectedPartitions) > 0){
             #select a destination directory to dump to
-            
-            my $status = "";
-            foreach my $partition (@selectedPartitions){
-                if($partition eq 'mbr'){
-                    #we use sfdisk to dump mbr
-                }
-                elsif($partition eq 'bootloader'){
-                    #we use dd to dump bootloader
+            my $directory = $dialog->dselect('path' => ".");
+            print $directory;
+            if($directory){
+                #truncate log
+                `echo "Starting backup process" > $logfile`;
+                foreach my $partition (reverse @selectedPartitions){
+                    #log something
+                    `echo "Starting to backup $partition" >> $logfile`;
                     
-                }
-                else{
-                    #regular partition. Based on the filesystem we dump it either with fsarchiver or partimage
+                    #if the backend supports it, display a simple progress bar
+                    if($dialog->{'_ui_dialog'}->can('gauge_start')){
+                        $dialog->{'_ui_dialog'}->gauge_start(text => "Performing backup", percentage => 1);
+                    }
+                    if($partition eq 'mbr'){
+                        #we use sfdisk to dump mbr + ebr
+                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
+                        `cat '$directory/partition_table.txt' 2>&1 >> $logfile`;
+                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                            $dialog->{'_ui_dialog'}->gauge_inc(5);
+                            #sleep 5;
+                        }
+                    }
+                    elsif($partition eq 'bootloader'){
+                        #we use dd to dump bootloader. We dump the partition table as a binary, just to be safe
+                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} 2>&1 >> $logfile`;
+                        my $size = -s "$directory/bootloader.bin";
+                        `echo "Bootloader backup size: $size bytes" >> $logfile`;
+                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                            $dialog->{'_ui_dialog'}->gauge_inc(5);
+                            #sleep 5;
+                        }
+                    }
+                    else{
+                        #regular partition. Based on the filesystem we dump it either with fsarchiver or partclone
+                        $partition=~/([0-9]+)$/;
+                        my $partitionNumber = $1;
+                        
+                        if($partitions{$partition}{literalType} eq 'vfat'){
+                            #we use partclone
+                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
+                            `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
+                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                #sleep 5;
+                            }
+                        }
+                        elsif($partitions{$partition}{literalType} =~/ext[234]/){
+                            #we use fsarchiver
+                            `$bin{'fsarchiver'} savefs "$directory/partition_${partitionNumber}.fsa" $partition 2>&1 >> $logfile`;
+                            `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" 2>&1 >> $logfile`;
+                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                #sleep 5;
+                            }
+                        }
+                        else{
+                            #not supported filesystem type!
+                            $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Backup will skip it");
+                            `echo "Skipping partition $partition because it has an unsupported type" >> $logfile`;
+                            
+                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                #sleep 5;
+                            }
+                        }
+                    }
                 }
                 
+                #finalize progress bar
+                if($dialog->{'_ui_dialog'}->can('gauge_set')){
+                    $dialog->{'_ui_dialog'}->gauge_set(100);
+                    sleep 5;
+                }
+                
+                #show backup status
+                $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                #backup is finished. Program will now exist.
+            }
+            else{
+                $dialog->msgbox(title => "Odroid Backup error", text => "No destination selected for backup. Program will close");
             }
         }
         else{
@@ -269,7 +340,7 @@ sub checkUser{
 }
 
 sub checkDependencies{
-    #check for sfdisk, partimage, fsarchiver and perl modules
+    #check for sfdisk, partclone, fsarchiver and perl modules
     
     my $message = "";
     
@@ -282,7 +353,7 @@ sub checkDependencies{
     if($rc){
         # UI::Dialog loaded and imported successfully
         # initialize it and display errors via UI
-        $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, order => [ 'zenity', 'dialog', 'ascii' ], literal => 1 );
+        $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, height => 400, order => [ 'zenity', 'dialog', 'ascii' ], literal => 1 );
         
     }
     else{

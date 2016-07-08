@@ -95,16 +95,16 @@ if($mainOperation eq 'backup'){
             }
             
             $description.="start sector $partitions{$part}{start}";
-            my @content =  ( $description, 0 );
+            my @content =  ( $description, 1 );
             push @displayedPartitions, \@content;
         }
         
         #create a checkbox selector that allows users to select what they want to backup
-        my @selectedPartitions = $dialog->checklist(text => "Please select the partitions you want to back-up",
+        my @selectedPartitions = $dialog->checklist(title => "Odroid backup", text => "Please select the partitions you want to back-up",
                     list => \@displayedPartitions);
         print join(",", @selectedPartitions);
         
-        if(scalar(@selectedPartitions) > 0){
+        if(scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0'){
             #select a destination directory to dump to
             my $directory = $dialog->dselect('path' => ".");
             print $directory;
@@ -121,7 +121,7 @@ if($mainOperation eq 'backup'){
                     
                     #if the backend supports it, display a simple progress bar
                     if($dialog->{'_ui_dialog'}->can('gauge_start')){
-                        $dialog->{'_ui_dialog'}->gauge_start(title => 'Odroid Backup', text => "Performing backup", percentage => 1);
+                        $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text => "Performing backup...", percentage => 1);
                     }
                     if($partition eq 'mbr'){
                         #we use sfdisk to dump mbr + ebr
@@ -181,7 +181,7 @@ if($mainOperation eq 'backup'){
                 #finalize progress bar
                 if($dialog->{'_ui_dialog'}->can('gauge_set')){
                     $dialog->{'_ui_dialog'}->gauge_set(100);
-                    sleep 5;
+                    #sleep 5;
                 }
                 
                 #show backup status

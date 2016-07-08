@@ -111,20 +111,24 @@ if($mainOperation eq 'backup'){
             if($directory){
                 #truncate log
                 `echo "Starting backup process" > $logfile`;
+                
+                my $partitionCount = scalar(@selectedPartitions);
+                my $progressStep = int(100/$partitionCount);
+                
                 foreach my $partition (reverse @selectedPartitions){
                     #log something
                     `echo "Starting to backup $partition" >> $logfile`;
                     
                     #if the backend supports it, display a simple progress bar
                     if($dialog->{'_ui_dialog'}->can('gauge_start')){
-                        $dialog->{'_ui_dialog'}->gauge_start(text => "Performing backup", percentage => 1);
+                        $dialog->{'_ui_dialog'}->gauge_start(title => 'Odroid Backup', text => "Performing backup", percentage => 1);
                     }
                     if($partition eq 'mbr'){
                         #we use sfdisk to dump mbr + ebr
                         `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
                         `cat '$directory/partition_table.txt' 2>&1 >> $logfile`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc(5);
+                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                             #sleep 5;
                         }
                     }
@@ -134,7 +138,7 @@ if($mainOperation eq 'backup'){
                         my $size = -s "$directory/bootloader.bin";
                         `echo "Bootloader backup size: $size bytes" >> $logfile`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc(5);
+                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                             #sleep 5;
                         }
                     }
@@ -148,7 +152,7 @@ if($mainOperation eq 'backup'){
                             `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
                             `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                 #sleep 5;
                             }
                         }
@@ -157,7 +161,7 @@ if($mainOperation eq 'backup'){
                             `$bin{'fsarchiver'} savefs "$directory/partition_${partitionNumber}.fsa" $partition 2>&1 >> $logfile`;
                             `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" 2>&1 >> $logfile`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                 #sleep 5;
                             }
                         }
@@ -167,7 +171,7 @@ if($mainOperation eq 'backup'){
                             `echo "Skipping partition $partition because it has an unsupported type" >> $logfile`;
                             
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc(15);
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                 #sleep 5;
                             }
                         }

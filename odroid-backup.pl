@@ -382,7 +382,11 @@ if($mainOperation eq 'restore'){
                         #we use dd to restore bootloader. We skip the partition table even if it's included
                         `echo "*** Restoring Bootloader ***" >> $logfile`;
                         `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=512 skip=1 seek=1 >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
-                       
+                        
+                        #BUT, the odroid will likely not boot if the boot code in the MBR is invalid. So we restore it now
+                        `echo "*** Restoring Bootstrap code ***" >> $logfile`;
+                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=446 count=1 >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                        
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                             $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                             #sleep 5;

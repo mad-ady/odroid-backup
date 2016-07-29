@@ -38,6 +38,7 @@ Options
 }
 checkDependencies();
 checkUser();
+firstTimeWarning();
 
 my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
 
@@ -603,6 +604,18 @@ sub checkUser{
     }
 }
 
+sub firstTimeWarning{
+    #issue a warning to let the users know that they might clobber their system if they are not careful
+    my $homedir = (getpwuid $>)[7];
+    if(! -f $homedir."/.odroid-backup"){
+        #running the first time
+        $dialog->msgbox(title => "Odroid Backup warning", text => "WARNING: This script attempts to backup and restore eMMCs and SD cards for Odroid systems. It should work with other systems as well, but it was not tested. Since restore can be a dangerous activity take the time to understand what's going on and make sure you're not destroying valuable data. It is wise to test a backup after it was made (image it to a different card and try to boot the system) in order to rule out backup errors. When backup or restore completes you will be presented with a log of what happened. It is wise to review the log, since not all errors are caught by this script (actually none is treated). I am not responsible for corrupted backups, impossible to restore backups, premature baldness or World War 3. This is your only warning! Good luck!");
+        
+        #create a file in the user's homedir so that we remember he's been warned
+        open FILE, ">$homedir/.odroid-backup" or die "Unable to write $homedir/.odroid-backup";
+        close FILE;
+    }
+}
 sub checkDependencies{
     #check for sfdisk, partclone, fsarchiver and perl modules
     

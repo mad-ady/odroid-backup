@@ -18,6 +18,8 @@ my %dependencies = (
 'dd' => 'sudo apt-get install coreutils',
 'partclone.vfat' => 'sudo apt-get install partclone',
 'partclone.info' => 'sudo apt-get install partclone',
+'partclone.restore' => 'sudo apt-get install partclone',
+'partprobe' => 'sudo apt-get install parted',
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -117,7 +119,7 @@ if($mainOperation eq 'backup'){
                 
                 foreach my $partition (reverse @selectedPartitions){
                     #log something
-                    `echo "Starting to backup $partition" >> $logfile`;
+                    `echo "*** Starting to backup $partition ***" >> $logfile`;
                     
                     #if the backend supports it, display a simple progress bar
                     if($dialog->{'_ui_dialog'}->can('gauge_start')){
@@ -125,8 +127,8 @@ if($mainOperation eq 'backup'){
                     }
                     if($partition eq 'mbr'){
                         #we use sfdisk to dump mbr + ebr
-                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
-                        `cat '$directory/partition_table.txt' 2>&1 >> $logfile`;
+                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'; echo "Error code: $?" >> $logfile `;
+                        `cat '$directory/partition_table.txt' >> $logfile 2>&1`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                             $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                             #sleep 5;
@@ -134,9 +136,9 @@ if($mainOperation eq 'backup'){
                     }
                     elsif($partition eq 'bootloader'){
                         #we use dd to dump bootloader. We dump the partition table as a binary, just to be safe
-                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} 2>&1 >> $logfile`;
+                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
                         my $size = -s "$directory/bootloader.bin";
-                        `echo "Bootloader backup size: $size bytes" >> $logfile`;
+                        `echo "*** Bootloader backup size: $size bytes ***" >> $logfile`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                             $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                             #sleep 5;
@@ -149,8 +151,8 @@ if($mainOperation eq 'backup'){
                         
                         if($partitions{$partition}{literalType} eq 'vfat'){
                             #we use partclone
-                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
-                            `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" 2>&1 >> $logfile`;
+                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                            `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                 #sleep 5;
@@ -158,8 +160,8 @@ if($mainOperation eq 'backup'){
                         }
                         elsif($partitions{$partition}{literalType} =~/ext[234]/){
                             #we use fsarchiver
-                            `$bin{'fsarchiver'} savefs "$directory/partition_${partitionNumber}.fsa" $partition 2>&1 >> $logfile`;
-                            `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" 2>&1 >> $logfile`;
+                            `$bin{'fsarchiver'} savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                            `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                 #sleep 5;
@@ -168,7 +170,7 @@ if($mainOperation eq 'backup'){
                         else{
                             #not supported filesystem type!
                             $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Backup will skip it");
-                            `echo "Skipping partition $partition because it has an unsupported type" >> $logfile`;
+                            `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
                             
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
@@ -202,6 +204,263 @@ if($mainOperation eq 'backup'){
     }
 }
 if($mainOperation eq 'restore'){
+    #select source directory
+    my $directory = $dialog->dselect(title => "Odroid backup", text => "Please select the directory holding your backup", 'path' => ".");
+    print $directory;
+    if($directory){
+        #check that there are files we recognize and can restore
+        opendir ( DIR, $directory ) || die "Error in opening dir $directory\n";
+        my %partitions = ();
+        while( (my $filename = readdir(DIR))){
+            #print("$filename\n");
+            if($filename eq 'partition_table.txt'){
+                #found MBR
+                $partitions{'mbr'}{'start'} = 0;
+                $partitions{'mbr'}{'literalType'} = "bin";
+                $partitions{'mbr'}{'size'} = 512;
+                $partitions{'mbr'}{'sizeHuman'} = 512;
+                $partitions{'mbr'}{'label'} = "MBR+EBR";
+                $partitions{'mbr'}{'filename'} = "$directory/$filename";
+            }
+            if($filename eq 'bootloader.bin'){
+                #found Bootloader
+                $partitions{'bootloader'}{'start'} = 512;
+                $partitions{'bootloader'}{'literalType'} = "bin";
+                $partitions{'bootloader'}{'size'} = -s "$directory/$filename";
+                $partitions{'bootloader'}{'sizeHuman'} = $human->format($partitions{'bootloader'}{'size'});
+                $partitions{'bootloader'}{'label'} = "Bootloader";
+                $partitions{'bootloader'}{'filename'} = "$directory/$filename";
+            }
+            if($filename=~/partition_([0-9]+)\.(img|fsa)/){
+                my $partition_index = $1;
+                my $type = $2;
+                #based on the extension we'll extract information about the partition
+                if($type eq 'img'){
+                    my @output = `$bin{'partclone.info'} -s "$directory/$filename" 2>&1`;
+                    print join("\n", @output);
+                    foreach my $line(@output){
+                        if($line=~/File system:\s+([^\s]+)/){
+                            $partitions{$partition_index}{'literalType'} = $1;
+                        }
+                        if($line=~/Device size:\s+.*= ([0-9]+) Blocks/){
+                            #TODO: We assume a block size of 512 bytes
+                            my $size = $1;
+                            $size *= 512;
+                            $partitions{$partition_index}{'size'} = $size;
+                            $partitions{$partition_index}{'sizeHuman'} = $human->format($size);
+                            $partitions{$partition_index}{'label'} = "Parition $partition_index";
+                        }
+                    }
+                }
+                else{
+                    #fsa archives
+                    my @output = `$bin{'fsarchiver'} archinfo "$directory/$filename" 2>&1`;
+                    #this is only designed for one partition per archive, although fsarchiver supports multiple. Not a bug, just as designed :)
+                    print join("\n", @output);
+                    foreach my $line(@output){
+                        if($line=~/Filesystem format:\s+([^\s]+)/){
+                            $partitions{$partition_index}{'literalType'} = $1;
+                        }
+                        if($line=~/Filesystem label:\s+([^\s]+)/){
+                            $partitions{$partition_index}{'label'} = "Partition $partition_index ($1)";
+                        }
+                        if($line=~/Original filesystem size:\s+.*\(([0-9]+) bytes/){
+                            $partitions{$partition_index}{'size'} = $1;
+                            $partitions{$partition_index}{'sizeHuman'} = $human->format($partitions{$partition_index}{'size'});
+                        }
+                    }
+                }
+                $partitions{$partition_index}{'start'} = 0; #we don't need this for restore anyway
+                $partitions{$partition_index}{'filename'} = "$directory/$filename";
+            }
+        }
+        closedir(DIR);
+        print Dumper(\%partitions);
+        
+        #select what to restore
+        if(scalar keys %partitions > 0){
+            #convert the partitions hash to an array the way checklist expects
+            my @displayedPartitions = ();
+            foreach my $part (sort keys %partitions){
+                push @displayedPartitions, $part;
+                my $description = "";
+                if(defined $partitions{$part}{label}){
+                    $description.="$partitions{$part}{label}, ";
+                }
+                $description.="$partitions{$part}{sizeHuman}, ";
+                
+                if(defined $partitions{$part}{literalType}){
+                    $description.="$partitions{$part}{literalType}, ";
+                }
+            
+                my @content =  ( $description, 1 );
+                push @displayedPartitions, \@content;
+            }
+            
+            #create a checkbox selector that allows users to select what they want to backup
+            my @selectedPartitions = $dialog->checklist(title => "Odroid backup", text => "Please select the partitions you want to restore",
+                        list => \@displayedPartitions);
+            print join(",", @selectedPartitions);
+            
+            if(scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0'){
+                #convert selectedPartitions to a hash for simpler lookup
+                my %selectedPartitionsHash = map { $_ => 1 } @selectedPartitions;
+                
+                my $partitionCount = scalar(@selectedPartitions);
+                my $progressStep = int(100/$partitionCount);
+                
+                #select destination disk
+                #get a list of removable drives (or all drives if so desired)
+                my %disks = getRemovableDisks();
+                
+                #convert the disks hash to an array the way radiolist expects
+                my @displayedDisks = ();
+                foreach my $disk (sort keys %disks){
+                    push @displayedDisks, $disk;
+                    my @content =  ( "$disks{$disk}{model}, $disks{$disk}{sizeHuman}, $disks{$disk}{removable}", 0 );
+                    push @displayedDisks, \@content;
+                }
+                
+            #    print Dumper(\@displayedDisks);
+                #create a radio dialog for the user to select the desired disk
+                my $selectedDisk = $dialog->radiolist(title => "Odroid backup", text => "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
+                                list => \@displayedDisks);
+                
+                print "Selected disk is: $selectedDisk\n";
+                
+                if($selectedDisk){
+                    #Check that the selectedDisk doesn't have mounted partitions anywhere
+                    my %mountedPartitions = getMountedPartitions();
+                    my $mountError=undef;
+                    foreach my $dev (keys %mountedPartitions){
+                        if($dev=~/^\/dev\/${selectedDisk}p?([0-9]+)$/){
+                            my $number = $1;
+                            #found a mounted partition on the target disk. Complain if it was scheduled for restore, or if MBR is to be restored
+                            if(defined $selectedPartitionsHash{$number}){
+                                $mountError.="$dev is already mounted on $mountedPartitions{$dev} and is scheduled for restore. ";
+                            }
+                            if(defined $selectedPartitionsHash{'mbr'}){
+                                $mountError.="$dev is already mounted on $mountedPartitions{$dev} and MBR is scheduled for restore. ";
+                            }
+                        }
+                    }
+                    
+                    if(defined $mountError){
+                        $dialog->msgbox(title => "Odroid Backup error", text => "There are mounted filesystems on the target device. $mountError Restore will abort.");
+                        exit;
+                    }
+                    #perform restore
+                    #truncate log
+                    `echo "Starting restore process" > $logfile`;
+                    
+                    #if the backend supports it, display a simple progress bar
+                    if($dialog->{'_ui_dialog'}->can('gauge_start')){
+                        $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text => "Performing restore...", percentage => 1);
+                    }
+                    
+                    #restore MBR first
+                    if(defined $selectedPartitionsHash{'mbr'}){
+                        #we use sfdisk to restore mbr + ebr
+                        `echo "*** Restoring MBR ***" >> $logfile`;
+                        `$bin{sfdisk} /dev/$selectedDisk < '$partitions{mbr}{filename}' >> $logfile 2>&1 ; echo "Error code: $?" >> $logfile`;
+                        #`cat '$directory/partition_table.txt' >> $logfile 2>&1`;
+                        
+                        #force the kernel to reread the new partition table
+                        `$bin{partprobe} -s /dev/$selectedDisk >> $logfile 2>&1`;
+                        
+                        sleep 2;
+                        
+                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                            #sleep 5;
+                        }
+                    }
+                    #restore Bootloader second
+                    if(defined $selectedPartitionsHash{'bootloader'}){
+                        #we use dd to restore bootloader. We skip the partition table even if it's included
+                        `echo "*** Restoring Bootloader ***" >> $logfile`;
+                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=512 skip=1 seek=1 >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                       
+                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                            #sleep 5;
+                        }
+                    }
+                    
+                    #restore remaining partitions
+                    foreach my $partition (sort keys %selectedPartitionsHash){
+                        if($partition =~/^[0-9]+$/){
+                            `echo "*** Restoring Partition $partition ***" >> $logfile`;
+                            #regular partition. Based on the filesystem we dump it either with fsarchiver or partclone
+                            my $partitionNumber = $partition;
+                            
+                            #note that we need to restore to a partition, not a disk. So we'll need to construct/detect what the corresponding parition numbers are
+                            #this program only supports a 1:1 mapping with what's in the archive (nothing fancy). The mapping may be incomplete and flawed for some
+                            #use cases - patches welcome
+                            
+                            my $partitionDev = "";
+                            if($selectedDisk =~/mmcblk|loop/){
+                                #these ones have a "p" appended between disk and partition (e.g. mmcblk0p1)
+                                $partitionDev = $selectedDisk."p".$partitionNumber;
+                            }
+                            else{
+                                #partition goes immediately after the disk name (e.g. sdd1)
+                                $partitionDev = $selectedDisk.$partitionNumber;
+                            }
+                            
+                            if($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'FAT16' || $partitions{$partition}{literalType} eq 'FAT32'){
+                                #we use partclone
+                                
+                                
+                                `$bin{'partclone.restore'} -s '$partitions{$partitionNumber}{filename}' -o '/dev/$partitionDev' >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                            elsif($partitions{$partition}{literalType} =~/ext[234]/i){
+                                #we use fsarchiver
+                                `$bin{'fsarchiver'} restfs '$partitions{$partitionNumber}{filename}' id=0,dest=/dev/$partitionDev >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                            else{
+                                #not supported filesystem type!
+                                $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Restore will skip it");
+                                `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
+                                
+                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                #finalize progress bar
+                if($dialog->{'_ui_dialog'}->can('gauge_set')){
+                    $dialog->{'_ui_dialog'}->gauge_set(100);
+                    #sleep 5;
+                }
+                
+                #show backup status
+                $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                #restore is finished. Program will now exit.
+            }
+            else{
+                $dialog->msgbox(title => "Odroid Backup error", text => "No partitions selected for restore. Program will close");
+            }
+        }
+        else{
+            #we found nothing useful in the backup dir
+            $dialog->msgbox(title => "Odroid Backup error", text => "No backups found in $directory. Program will close");
+        }
+    }
+    
+    
     
 }
 
@@ -284,6 +543,7 @@ sub getMountedPartitions{
     open MOUNTS, "/proc/mounts" or die "Unable to open /proc/mounts. $!";
     my %filesystems = ();
     while(<MOUNTS>){
+        #/dev/sdb2 / ext4 rw,relatime,errors=remount-ro,data=ordered 0 0
         if(/^(\/dev\/[^\s]+)\s+([^\s]+)\s+/){
             $filesystems{$1}=$2;
         }

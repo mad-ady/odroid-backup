@@ -42,7 +42,7 @@ firstTimeWarning();
 
 my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
 
-my $mainOperation = $dialog->radiolist(title => "Odroid Backup", text => "Please select if you want to perform a backup or a restore:", 
+my $mainOperation = $dialog->radiolist(title => "Odroid Backup - Please select if you want to perform a backup or a restore:", text => "Please select if you want to perform a backup or a restore:", 
                     list => [   'backup', [ 'Backup partitions', 1],
                                 'restore', [ 'Restore partitions', 0] ]);
                                 
@@ -62,7 +62,7 @@ if($mainOperation eq 'backup'){
     
 #    print Dumper(\@displayedDisks);
     #create a radio dialog for the user to select the desired disk
-    my $selectedDisk = $dialog->radiolist(title => "Odroid backup", text => "Please select the disk you wish to backup",
+    my $selectedDisk = $dialog->radiolist(title => "Odroid backup - Please select the disk you wish to backup", text => "Please select the disk you wish to backup",
                     list => \@displayedDisks);
     
     print $selectedDisk;
@@ -103,7 +103,7 @@ if($mainOperation eq 'backup'){
         }
         
         #create a checkbox selector that allows users to select what they want to backup
-        my @selectedPartitions = $dialog->checklist(title => "Odroid backup", text => "Please select the partitions you want to back-up",
+        my @selectedPartitions = $dialog->checklist(title => "Odroid backup - Please select the partitions you want to back-up", text => "Please select the partitions you want to back-up",
                     list => \@displayedPartitions);
         print join(",", @selectedPartitions);
         
@@ -206,7 +206,7 @@ if($mainOperation eq 'backup'){
 }
 if($mainOperation eq 'restore'){
     #select source directory
-    my $directory = $dialog->dselect(title => "Odroid backup", text => "Please select the directory holding your backup", 'path' => ".");
+    my $directory = $dialog->dselect(title => "Odroid backup - Please select the directory holding your backup", text => "Please select the directory holding your backup", 'path' => ".");
     print $directory;
     if($directory){
         #check that there are files we recognize and can restore
@@ -299,7 +299,7 @@ if($mainOperation eq 'restore'){
             }
             
             #create a checkbox selector that allows users to select what they want to backup
-            my @selectedPartitions = $dialog->checklist(title => "Odroid backup", text => "Please select the partitions you want to restore",
+            my @selectedPartitions = $dialog->checklist(title => "Odroid backup - Please select the partitions you want to restore", text => "Please select the partitions you want to restore",
                         list => \@displayedPartitions);
             print join(",", @selectedPartitions);
             
@@ -324,7 +324,7 @@ if($mainOperation eq 'restore'){
                 
             #    print Dumper(\@displayedDisks);
                 #create a radio dialog for the user to select the desired disk
-                my $selectedDisk = $dialog->radiolist(title => "Odroid backup", text => "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
+                my $selectedDisk = $dialog->radiolist(title => "Odroid backup - Please select the disk you wish to restore to. Only the selected partitions will be restored.", text => "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
                                 list => \@displayedDisks);
                 
                 print "Selected disk is: $selectedDisk\n";

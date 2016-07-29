@@ -24,7 +24,7 @@ my %dependencies = (
 
 my $logfile = '/var/log/odroid-backup.log';
 
-GetOptions(\%options, 'help|h', 'allDisks|a');
+GetOptions(\%options, 'help|h', 'allDisks|a', 'text|t');
 if(defined $options{help}){
     print "Odroid Backup program\n
 Usage $0 options
@@ -32,6 +32,7 @@ Options
 
 --help|-h       Print this message
 --allDisks|-a   Display all disks in the selector (by default only removable disks are shown)
+--text|-t       Force rendering with dialog even if zenity is available
 
 ";
     exit 0;
@@ -249,7 +250,7 @@ if($mainOperation eq 'restore'){
                             $size *= 512;
                             $partitions{$partition_index}{'size'} = $size;
                             $partitions{$partition_index}{'sizeHuman'} = $human->format($size);
-                            $partitions{$partition_index}{'label'} = "Parition $partition_index";
+                            $partitions{$partition_index}{'label'} = "Partition $partition_index";
                         }
                     }
                 }
@@ -395,7 +396,7 @@ if($mainOperation eq 'restore'){
                             #regular partition. Based on the filesystem we dump it either with fsarchiver or partclone
                             my $partitionNumber = $partition;
                             
-                            #note that we need to restore to a partition, not a disk. So we'll need to construct/detect what the corresponding parition numbers are
+                            #note that we need to restore to a partition, not a disk. So we'll need to construct/detect what the corresponding partition numbers are
                             #this program only supports a 1:1 mapping with what's in the archive (nothing fancy). The mapping may be incomplete and flawed for some
                             #use cases - patches welcome
                             
@@ -630,7 +631,12 @@ sub checkDependencies{
     if($rc){
         # UI::Dialog loaded and imported successfully
         # initialize it and display errors via UI
-        $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, height => 400, order => [ 'zenity', 'dialog', 'ascii' ], literal => 1 );
+        my @ui = ('zenity', 'dialog', 'ascii');
+        if(defined $options{'text'}){
+            #force rendering only with dialog
+            @ui = ('dialog', 'ascii');
+        }
+        $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, height => 400, order => \@ui, literal => 1 );
         
     }
     else{

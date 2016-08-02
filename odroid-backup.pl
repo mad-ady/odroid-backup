@@ -632,6 +632,8 @@ sub checkDependencies{
         1;
     };
 
+    my %toinstall = ();
+    
     if($rc){
         # UI::Dialog loaded and imported successfully
         # initialize it and display errors via UI
@@ -644,7 +646,10 @@ sub checkDependencies{
         
     }
     else{
-        $message .= "UI::Dialog missing - You can install it with sudo apt-get install libui-dialog-perl zenity dialog\n";
+        $message .= "UI::Dialog missing...\n";
+        $toinstall{'libui-dialog-perl'} = 1;
+        $toinstall{'zenity'} = 1;
+        $toinstall{'dialog'} = 1;
     }
     
     #check if other perl modules are available
@@ -654,7 +659,8 @@ sub checkDependencies{
     };
     
     if(!$readable){
-        $message .= "Number::Bytes::Human missing - You can install it with sudo apt-get install libnumber-bytes-human-perl\n";
+        $message .= "Number::Bytes::Human missing...\n";
+        $toinstall{'libnumber-bytes-human-perl'} = 1;
     }
     
     my $json = eval{
@@ -662,11 +668,12 @@ sub checkDependencies{
         1;
     };
     if(!$json){
-        $message .= "JSON missing - You can install it with sudo apt-get install libjson-perl\n";
+        $message .= "JSON missing...\n";
+        $toinstall{'libjson-perl'} = 1;
     }
     
     #check if system binaries are available
-    my %toinstall = ();
+    
     foreach my $program (sort keys %dependencies){
         $bin{$program} = `which $program`;
         $bin{$program}=~s/\s+|\r|\n//g;

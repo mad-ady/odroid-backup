@@ -432,6 +432,9 @@ if($mainOperation eq 'restore'){
                                     #sleep 5;
                                 }
                             }
+                            elsif($partitions{$partition}{type} eq '5'){
+                                #extended partition - nothing to do, it will be restored via sfdisk automatically
+                            }
                             else{
                                 #not supported filesystem type!
                                 $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Restore will skip it");

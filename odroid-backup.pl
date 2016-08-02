@@ -10,16 +10,16 @@ my $dialog;
 my %bin;
 my %options = ();
 my %dependencies = (
-'sfdisk' => 'sudo apt-get install sfdisk',
-'fsarchiver' => 'sudo apt-get install fsarchiver',
-'udevadm' => 'sudo apt-get install udev',
-'blockdev' => 'sudo apt-get install util-linux',
-'blkid' => 'sudo apt-get install util-linux',
-'dd' => 'sudo apt-get install coreutils',
-'partclone.vfat' => 'sudo apt-get install partclone',
-'partclone.info' => 'sudo apt-get install partclone',
-'partclone.restore' => 'sudo apt-get install partclone',
-'partprobe' => 'sudo apt-get install parted',
+'sfdisk' => 'sfdisk',
+'fsarchiver' => 'fsarchiver',
+'udevadm' => 'udev',
+'blockdev' => 'util-linux',
+'blkid' => 'util-linux',
+'dd' => 'coreutils',
+'partclone.vfat' => 'partclone',
+'partclone.info' => 'partclone',
+'partclone.restore' => 'partclone',
+'partprobe' => 'parted',
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -666,12 +666,18 @@ sub checkDependencies{
     }
     
     #check if system binaries are available
+    my %toinstall = ();
     foreach my $program (sort keys %dependencies){
         $bin{$program} = `which $program`;
         $bin{$program}=~s/\s+|\r|\n//g;
         if($bin{$program} eq ''){
-            $message .= "$program missing - You can install it with $dependencies{$program}\n";
+            $message .= "$program missing...\n";
+            $toinstall{$dependencies{$program}}=1;
         }
+    }
+    if(scalar keys %toinstall > 0){
+        my $packages = join(" ", keys %toinstall);
+        $message .= "To install missing dependencies run\n  sudo apt-get install $packages\n";
     }
     
     #complain if needed

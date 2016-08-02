@@ -162,7 +162,7 @@ if($mainOperation eq 'backup'){
                         }
                         elsif($partitions{$partition}{literalType} =~/ext[234]/){
                             #we use fsarchiver
-                            `$bin{'fsarchiver'} savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                            `$bin{'fsarchiver'} -A savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
                             `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);

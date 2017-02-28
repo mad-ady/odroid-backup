@@ -106,8 +106,16 @@ if($mainOperation eq 'backup'){
         #create a checkbox selector that allows users to select what they want to backup
         my @selectedPartitions = $dialog->checklist(title => "Odroid backup - Please select the partitions you want to back-up", text => "Please select the partitions you want to back-up",
                     list => \@displayedPartitions);
-        print join(",", @selectedPartitions);
-        
+
+       #fix an extra "$" being appended to the selected element sometimes by zenity
+       print "Partition list after select box: ". join(",", @selectedPartitions);
+       for (my $i=0; $i<scalar(@selectedPartitions); $i++){
+               if($selectedPartitions[$i]=~/\$$/){
+                       $selectedPartitions[$i]=~s/\$$//g;
+               }
+       }
+        print "Partition list after cleanup". join(",", @selectedPartitions);
+
         if(scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0'){
             #select a destination directory to dump to
             my $directory = $dialog->dselect('path' => ".");

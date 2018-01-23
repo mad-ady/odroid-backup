@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Data::Dumper;
+use File::Path qw(make_path);
 #use UI::Dialog; #loaded dynamically later
 #use Number::Bytes::Human; #loaded dynamically later
 
@@ -121,6 +122,10 @@ if($mainOperation eq 'backup'){
             my $directory = $dialog->dselect('path' => ".");
             print $directory;
             if($directory){
+                #the directory might not exist. Test if it exists or create it
+                if (! -d "$directory" ){
+                    make_path($directory);
+                }
                 #truncate log
                 `echo "Starting backup process" > $logfile`;
                 

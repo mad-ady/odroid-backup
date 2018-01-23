@@ -50,6 +50,8 @@ my $mainOperation = $dialog->radiolist(title => "Odroid Backup - Please select i
                                 
 print "$mainOperation\n";
 
+my $error = 0;
+
 if($mainOperation eq 'backup'){
     #get a list of removable drives (or all drives if so desired)
     my %disks = getRemovableDisks();
@@ -142,7 +144,10 @@ if($mainOperation eq 'backup'){
                     }
                     if($partition eq 'mbr'){
                         #we use sfdisk to dump mbr + ebr
-                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'; echo "Error code: $?" >> $logfile `;
+                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
+                        $error = $? >> 8;
+                        `echo "Error code: $error" >> $logfile 2>&1`;
+
                         `cat '$directory/partition_table.txt' >> $logfile 2>&1`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                             $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
@@ -151,7 +156,10 @@ if($mainOperation eq 'backup'){
                     }
                     elsif($partition eq 'bootloader'){
                         #we use dd to dump bootloader. We dump the partition table as a binary, just to be safe
-                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} >> $logfile 2>&1`;
+                        $error = $? >> 8;
+                        `echo "Error code: $error" >> $logfile 2>&1`;
+
                         my $size = -s "$directory/bootloader.bin";
                         `echo "*** Bootloader backup size: $size bytes ***" >> $logfile`;
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
@@ -166,7 +174,10 @@ if($mainOperation eq 'backup'){
                         
                         if($partitions{$partition}{literalType} eq 'vfat'){
                             #we use partclone
-                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+
                             `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
@@ -175,7 +186,10 @@ if($mainOperation eq 'backup'){
                         }
                         elsif($partitions{$partition}{literalType} =~/ext[234]/){
                             #we use fsarchiver
-                            `$bin{'fsarchiver'} -A savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                            `$bin{'fsarchiver'} -A savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+
                             `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
                             if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                 $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
@@ -385,7 +399,10 @@ if($mainOperation eq 'restore'){
                     if(defined $selectedPartitionsHash{'mbr'}){
                         #we use sfdisk to restore mbr + ebr
                         `echo "*** Restoring MBR ***" >> $logfile`;
-                        `$bin{sfdisk} /dev/$selectedDisk < '$partitions{mbr}{filename}' >> $logfile 2>&1 ; echo "Error code: $?" >> $logfile`;
+                        `$bin{sfdisk} /dev/$selectedDisk < '$partitions{mbr}{filename}' >> $logfile 2>&1 `;
+                        $error = $? >> 8;
+                        `echo "Error code: $error" >> $logfile 2>&1`;
+
                         #`cat '$directory/partition_table.txt' >> $logfile 2>&1`;
                         
                         #force the kernel to reread the new partition table
@@ -402,11 +419,17 @@ if($mainOperation eq 'restore'){
                     if(defined $selectedPartitionsHash{'bootloader'}){
                         #we use dd to restore bootloader. We skip the partition table even if it's included
                         `echo "*** Restoring Bootloader ***" >> $logfile`;
-                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=512 skip=1 seek=1 >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=512 skip=1 seek=1 >> $logfile 2>&1`;
+                        $error = $? >> 8;
+                        `echo "Error code: $error" >> $logfile 2>&1`;
+
                         
                         #BUT, the odroid will likely not boot if the boot code in the MBR is invalid. So we restore it now
                         `echo "*** Restoring Bootstrap code ***" >> $logfile`;
-                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=446 count=1 >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                        `$bin{dd} if='$partitions{bootloader}{filename}' of=/dev/$selectedDisk bs=446 count=1 >> $logfile 2>&1`;
+                        $error = $? >> 8;
+                        `echo "Error code: $error" >> $logfile 2>&1`;
+
                         
                         if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                             $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
@@ -439,7 +462,10 @@ if($mainOperation eq 'restore'){
                                 #we use partclone
                                 
                                 
-                                `$bin{'partclone.restore'} -s '$partitions{$partitionNumber}{filename}' -o '/dev/$partitionDev' >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                                `$bin{'partclone.restore'} -s '$partitions{$partitionNumber}{filename}' -o '/dev/$partitionDev' >> $logfile 2>&1`;
+                                $error = $? >> 8;
+                                `echo "Error code: $error" >> $logfile 2>&1`;
+
                                 if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                     $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                     #sleep 5;
@@ -447,7 +473,10 @@ if($mainOperation eq 'restore'){
                             }
                             elsif($partitions{$partition}{literalType} =~/ext[234]/i){
                                 #we use fsarchiver
-                                `$bin{'fsarchiver'} restfs '$partitions{$partitionNumber}{filename}' id=0,dest=/dev/$partitionDev >> $logfile 2>&1; echo "Error code: $?" >> $logfile`;
+                                `$bin{'fsarchiver'} restfs '$partitions{$partitionNumber}{filename}' id=0,dest=/dev/$partitionDev >> $logfile 2>&1`;
+                                $error = $? >> 8;
+                                `echo "Error code: $error" >> $logfile 2>&1`;
+
                                 if($dialog->{'_ui_dialog'}->can('gauge_inc')){
                                     $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
                                     #sleep 5;

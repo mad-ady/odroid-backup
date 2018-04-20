@@ -21,6 +21,7 @@ my %dependencies = (
 'partclone.info' => 'partclone',
 'partclone.restore' => 'partclone',
 'partprobe' => 'parted',
+'flash_erase' => 'mtd-utils',
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -72,159 +73,191 @@ if($mainOperation eq 'backup'){
     print $selectedDisk;
     
     if($selectedDisk){
-        #get a list of partitions from the disk and their type
-        my %partitions = getPartitions($selectedDisk);
-        print Dumper(\%partitions);
-        
-        #convert the partitions hash to an array the way checklist expects
-        my @displayedPartitions = ();
-        foreach my $part (sort keys %partitions){
-            push @displayedPartitions, $part;
-            my $description = "";
-            if(defined $partitions{$part}{label}){
-                $description.="$partitions{$part}{label}, ";
-            }
-            $description.="$partitions{$part}{sizeHuman}, ";
-            
-            if(defined $partitions{$part}{literalType}){
-                $description.="$partitions{$part}{literalType} ($partitions{$part}{type}), ";
-            }
-            else{
-                $description.="type $partitions{$part}{type}, ";
-            }
-            
-            if(defined $partitions{$part}{mounted}){
-                $description.="mounted on $partitions{$part}{mounted}, ";
-            }
-            
-            if(defined $partitions{$part}{uuid}){
-                $description.="UUID $partitions{$part}{uuid}, ";
-            }
-            
-            $description.="start sector $partitions{$part}{start}";
-            my @content =  ( $description, 1 );
-            push @displayedPartitions, \@content;
-        }
-        
-        #create a checkbox selector that allows users to select what they want to backup
-        my @selectedPartitions = $dialog->checklist(title => "Odroid backup - Please select the partitions you want to back-up", text => "Please select the partitions you want to back-up",
-                    list => \@displayedPartitions);
-
-       #fix an extra "$" being appended to the selected element sometimes by zenity
-       print "Partition list after select box: ". join(",", @selectedPartitions);
-       for (my $i=0; $i<scalar(@selectedPartitions); $i++){
-               if($selectedPartitions[$i]=~/\$$/){
-                       $selectedPartitions[$i]=~s/\$$//g;
-               }
-       }
-        print "Partition list after cleanup". join(",", @selectedPartitions);
-
-        if(scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0'){
-            #select a destination directory to dump to
+        if($selectedDisk=~/mtd/){
+            #this is a flash device, use dd to back it up
             my $directory = $dialog->dselect('path' => ".");
             print $directory;
-            if($directory){
+            if ($directory) {
                 #the directory might not exist. Test if it exists or create it
-                if (! -d "$directory" ){
+                if (!-d "$directory") {
                     make_path($directory);
                 }
                 #truncate log
                 `echo "Starting backup process" > $logfile`;
-                
-                my $partitionCount = scalar(@selectedPartitions);
-                my $progressStep = int(100/$partitionCount);
-                
-                foreach my $partition (reverse @selectedPartitions){
-                    #log something
-                    `echo "*** Starting to backup $partition ***" >> $logfile`;
-                    
-                    #if the backend supports it, display a simple progress bar
-                    if($dialog->{'_ui_dialog'}->can('gauge_start')){
-                        $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text => "Performing backup...", percentage => 1);
-                    }
-                    if($partition eq 'mbr'){
-                        #we use sfdisk to dump mbr + ebr
-                        `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
-                        $error = $? >> 8;
-                        `echo "Error code: $error" >> $logfile 2>&1`;
 
-                        `cat '$directory/partition_table.txt' >> $logfile 2>&1`;
-                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                            #sleep 5;
-                        }
-                    }
-                    elsif($partition eq 'bootloader'){
-                        #we use dd to dump bootloader. We dump the partition table as a binary, just to be safe
-                        `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} >> $logfile 2>&1`;
-                        $error = $? >> 8;
-                        `echo "Error code: $error" >> $logfile 2>&1`;
+                `$bin{dd} if=/dev/$selectedDisk of="$directory/flash_$selectedDisk.bin" >> $logfile 2>&1`;
+                $error = $? >> 8;
+                `echo "Error code: $error" >> $logfile 2>&1`;
 
-                        my $size = -s "$directory/bootloader.bin";
-                        `echo "*** Bootloader backup size: $size bytes ***" >> $logfile`;
-                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                            #sleep 5;
-                        }
-                    }
-                    else{
-                        #regular partition. Based on the filesystem we dump it either with fsarchiver or partclone
-                        $partition=~/([0-9]+)$/;
-                        my $partitionNumber = $1;
-                        
-                        if($partitions{$partition}{literalType} eq 'vfat'){
-                            #we use partclone
-                            `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
-                            $error = $? >> 8;
-                            `echo "Error code: $error" >> $logfile 2>&1`;
+                my $size = -s "$directory/flash_$selectedDisk.bin";
+                `echo "*** MTD $selectedDisk backup size: $size bytes ***" >> $logfile`;
 
-                            `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
-                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
-                            }
-                        }
-                        elsif($partitions{$partition}{literalType} =~/ext[234]/){
-                            #we use fsarchiver
-                            `$bin{'fsarchiver'} -A savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1`;
-                            $error = $? >> 8;
-                            `echo "Error code: $error" >> $logfile 2>&1`;
-
-                            `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
-                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
-                            }
-                        }
-                        else{
-                            #not supported filesystem type!
-                            $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Backup will skip it");
-                            `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
-                            
-                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
-                            }
-                        }
-                    }
-                }
-                
-                #finalize progress bar
-                if($dialog->{'_ui_dialog'}->can('gauge_set')){
-                    $dialog->{'_ui_dialog'}->gauge_set(100);
-                    #sleep 5;
-                }
-                
                 #show backup status
                 $dialog->textbox(title => "Odroid Backup status", path => $logfile);
-                #backup is finished. Program will now exist.
-            }
-            else{
-                $dialog->msgbox(title => "Odroid Backup error", text => "No destination selected for backup. Program will close");
+                #backup is finished. Program will now exit.
             }
         }
-        else{
-            $dialog->msgbox(title => "Odroid Backup error", text => "No partitions selected for backup. Program will close");
+        else {
+            #get a list of partitions from the disk and their type
+            my %partitions = getPartitions($selectedDisk);
+            print Dumper(\%partitions);
+
+            #convert the partitions hash to an array the way checklist expects
+            my @displayedPartitions = ();
+            foreach my $part (sort keys %partitions) {
+                push @displayedPartitions, $part;
+                my $description = "";
+                if (defined $partitions{$part}{label}) {
+                    $description .= "$partitions{$part}{label}, ";
+                }
+                $description .= "$partitions{$part}{sizeHuman}, ";
+
+                if (defined $partitions{$part}{literalType}) {
+                    $description .= "$partitions{$part}{literalType} ($partitions{$part}{type}), ";
+                }
+                else {
+                    $description .= "type $partitions{$part}{type}, ";
+                }
+
+                if (defined $partitions{$part}{mounted}) {
+                    $description .= "mounted on $partitions{$part}{mounted}, ";
+                }
+
+                if (defined $partitions{$part}{uuid}) {
+                    $description .= "UUID $partitions{$part}{uuid}, ";
+                }
+
+                $description .= "start sector $partitions{$part}{start}";
+                my @content = ($description, 1);
+                push @displayedPartitions, \@content;
+            }
+
+            #create a checkbox selector that allows users to select what they want to backup
+            my @selectedPartitions = $dialog->checklist(title                            =>
+                "Odroid backup - Please select the partitions you want to back-up", text =>
+                "Please select the partitions you want to back-up",
+                list                                                                     => \@displayedPartitions);
+
+            #fix an extra "$" being appended to the selected element sometimes by zenity
+            print "Partition list after select box: " . join(",", @selectedPartitions);
+            for (my $i = 0; $i < scalar(@selectedPartitions); $i++) {
+                if ($selectedPartitions[$i] =~ /\$$/) {
+                    $selectedPartitions[$i] =~ s/\$$//g;
+                }
+            }
+            print "Partition list after cleanup" . join(",", @selectedPartitions);
+
+            if (scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0') {
+                #select a destination directory to dump to
+                my $directory = $dialog->dselect('path' => ".");
+                print $directory;
+                if ($directory) {
+                    #the directory might not exist. Test if it exists or create it
+                    if (!-d "$directory") {
+                        make_path($directory);
+                    }
+                    #truncate log
+                    `echo "Starting backup process" > $logfile`;
+
+                    my $partitionCount = scalar(@selectedPartitions);
+                    my $progressStep = int(100 / $partitionCount);
+
+                    foreach my $partition (reverse @selectedPartitions) {
+                        #log something
+                        `echo "*** Starting to backup $partition ***" >> $logfile`;
+
+                        #if the backend supports it, display a simple progress bar
+                        if ($dialog->{'_ui_dialog'}->can('gauge_start')) {
+                            $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text =>
+                                "Performing backup...", percentage     => 1);
+                        }
+                        if ($partition eq 'mbr') {
+                            #we use sfdisk to dump mbr + ebr
+                            `$bin{sfdisk} -d /dev/$selectedDisk > '$directory/partition_table.txt'`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+
+                            `cat '$directory/partition_table.txt' >> $logfile 2>&1`;
+                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                #sleep 5;
+                            }
+                        }
+                        elsif ($partition eq 'bootloader') {
+                            #we use dd to dump bootloader. We dump the partition table as a binary, just to be safe
+                            `$bin{dd} if=/dev/$selectedDisk of="$directory/bootloader.bin" bs=512 count=$partitions{bootloader}{end} >> $logfile 2>&1`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+
+                            my $size = -s "$directory/bootloader.bin";
+                            `echo "*** Bootloader backup size: $size bytes ***" >> $logfile`;
+                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                #sleep 5;
+                            }
+                        }
+                        else {
+                            #regular partition. Based on the filesystem we dump it either with fsarchiver or partclone
+                            $partition =~ /([0-9]+)$/;
+                            my $partitionNumber = $1;
+
+                            if ($partitions{$partition}{literalType} eq 'vfat') {
+                                #we use partclone
+                                `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
+                                $error = $? >> 8;
+                                `echo "Error code: $error" >> $logfile 2>&1`;
+
+                                `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                            elsif ($partitions{$partition}{literalType} =~ /ext[234]/) {
+                                #we use fsarchiver
+                                `$bin{'fsarchiver'} -A savefs "$directory/partition_${partitionNumber}.fsa" $partition >> $logfile 2>&1`;
+                                $error = $? >> 8;
+                                `echo "Error code: $error" >> $logfile 2>&1`;
+
+                                `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                            else {
+                                #not supported filesystem type!
+                                $dialog->msgbox(title => "Odroid Backup error", text =>
+                                    "The partition $partition has a non-supported filesystem. Backup will skip it");
+                                `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
+
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
+                            }
+                        }
+                    }
+
+                    #finalize progress bar
+                    if ($dialog->{'_ui_dialog'}->can('gauge_set')) {
+                        $dialog->{'_ui_dialog'}->gauge_set(100);
+                        #sleep 5;
+                    }
+
+                    #show backup status
+                    $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                    #backup is finished. Program will now exit.
+                }
+                else {
+                    $dialog->msgbox(title => "Odroid Backup error", text =>
+                        "No destination selected for backup. Program will close");
+                }
+            }
+            else {
+                $dialog->msgbox(title => "Odroid Backup error", text =>
+                    "No partitions selected for backup. Program will close");
+            }
         }
         
     }
@@ -301,6 +334,26 @@ if($mainOperation eq 'restore'){
                 }
                 $partitions{$partition_index}{'start'} = 0; #we don't need this for restore anyway
                 $partitions{$partition_index}{'filename'} = "$directory/$filename";
+            }
+            if($filename=~/flash_(.*)\.bin/) {
+                my $mtddevice = $1;
+                #sanity check - the image to be flashed equals the current target size
+                my %localDisks = getRemovableDisks();
+                if(defined $localDisks{$mtddevice}){
+                    my $backupsize = -s "$directory/$filename";
+                    if($backupsize == $localDisks{$mtddevice}{'size'}) {
+                        $partitions{'flash_' . $mtddevice}{'literalType'} = "bin";
+                        $partitions{'flash_' . $mtddevice}{'size'} = $backupsize;
+                        $partitions{'flash_' . $mtddevice}{'sizeHuman'} = $human->format($backupsize);
+                        $partitions{'flash_' . $mtddevice}{'label'} = "MTD Flash $mtddevice";
+                        $partitions{'flash_' . $mtddevice}{'filename'} = "$directory/$filename";
+                    }
+
+                }
+                else{
+                    #silently skip non-matching flash sizes
+                }
+
             }
         }
         closedir(DIR);
@@ -436,7 +489,30 @@ if($mainOperation eq 'restore'){
                             #sleep 5;
                         }
                     }
-                    
+
+                    #restore flash
+                    foreach my $part (keys %selectedPartitionsHash){
+                        if($part=~/^flash_(.*)/){
+                            my $mtd = $1;
+                            #this has been checked and should be restoreable on the system (should already exist)
+                            `echo "*** Restoring $mtd ***" >> $logfile`;
+                            `echo "Erasing $mtd..." >> $logfile`;
+                            #first erase it
+                            `echo $bin{flash_erase} -q /dev/$mtd 0 0 >> $logfile 2>&1`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+                            #next, write it
+                            `$bin{dd} if='$partitions{$part}{filename}' of=/dev/$mtd bs=4096 >> $logfile 2>&1`;
+                            $error = $? >> 8;
+                            `echo "Error code: $error" >> $logfile 2>&1`;
+
+                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                #sleep 5;
+                            }
+                        }
+                    }
+
                     #restore remaining partitions
                     foreach my $partition (sort keys %selectedPartitionsHash){
                         if($partition =~/^[0-9]+$/){
@@ -641,6 +717,22 @@ sub getRemovableDisks{
         }
         print "$block\t$model\t$removable\n";
     }
+    # Also look for NAND flash and show it as a disk
+    if(open NAND, "/proc/mtd"){
+        while(<NAND>){
+            if(/^([^\s]+):\s+([0-9a-f]+)\s+([0-9a-f]+)\s+\"([^\"]+)\"/){
+                my $mtddevice = $1;
+                my $hexsize = $2;
+                my $erase = $3;
+                my $name = $4;
+                $disks{$mtddevice}{sizeHuman} = $human->format(hex($hexsize));
+                $disks{$mtddevice}{size} = hex($hexsize);
+                $disks{$mtddevice}{model} = "MTD Flash $name";
+                $disks{$mtddevice}{removable} = "non-removable";
+            }
+        }
+    }
+
     return %disks;
     
 }

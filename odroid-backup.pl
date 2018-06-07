@@ -203,7 +203,7 @@ if($mainOperation eq 'backup'){
 
                             if ($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'btrfs') {
                                 #we use partclone
-                                $partcloneVersion = "partclone.$partitions{$partition}{literalType}";
+                                my $partcloneVersion = "partclone.$partitions{$partition}{literalType}";
                                 `$bin{$partcloneVersion} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;

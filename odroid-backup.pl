@@ -18,10 +18,12 @@ my %dependencies = (
 'blkid' => 'util-linux',
 'dd' => 'coreutils',
 'partclone.vfat' => 'partclone',
+'partclone.btrfs' => 'partclone',
 'partclone.info' => 'partclone',
 'partclone.restore' => 'partclone',
 'partprobe' => 'parted',
 'flash_erase' => 'mtd-utils',
+'umount' => 'mount',
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -201,9 +203,12 @@ if($mainOperation eq 'backup'){
                             $partition =~ /([0-9]+)$/;
                             my $partitionNumber = $1;
 
-                            if ($partitions{$partition}{literalType} eq 'vfat') {
+                            if ($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'btrfs') {
                                 #we use partclone
-                                `$bin{'partclone.vfat'} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
+                                my $partcloneVersion = 'partclone.' . $partitions{$partition}{literalType};
+                                `echo "Using partclone binary: $partcloneVersion" >> $logfile 2>&1`;
+                                `$bin{umount} $partition`; #partition can't be mounted while backing it up (eg. btrfs), so let's un-mount it
+                                `$bin{"$partcloneVersion"} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;
 
@@ -534,10 +539,8 @@ if($mainOperation eq 'restore'){
                                 $partitionDev = $selectedDisk.$partitionNumber;
                             }
                             
-                            if($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'FAT16' || $partitions{$partition}{literalType} eq 'FAT32'){
+                            if($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'btrfs' || $partitions{$partition}{literalType} eq 'FAT16' || $partitions{$partition}{literalType} eq 'FAT32'){
                                 #we use partclone
-                                
-                                
                                 `$bin{'partclone.restore'} -s '$partitions{$partitionNumber}{filename}' -o '/dev/$partitionDev' >> $logfile 2>&1`;
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;

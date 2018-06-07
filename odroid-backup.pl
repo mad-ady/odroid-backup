@@ -23,6 +23,7 @@ my %dependencies = (
 'partclone.restore' => 'partclone',
 'partprobe' => 'parted',
 'flash_erase' => 'mtd-utils',
+'umount' => 'mount',
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -206,6 +207,7 @@ if($mainOperation eq 'backup'){
                                 #we use partclone
                                 my $partcloneVersion = 'partclone.' . $partitions{$partition}{literalType};
                                 `echo "Using partclone binary: $partcloneVersion" >> $logfile 2>&1`;
+                                `$bin{umount} $partition`; #partition can't be mounted while backing it up (eg. btrfs), so let's un-mount it
                                 `$bin{"$partcloneVersion"} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;

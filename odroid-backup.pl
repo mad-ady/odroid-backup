@@ -28,7 +28,7 @@ my %dependencies = (
 
 my $logfile = '/var/log/odroid-backup.log';
 
-GetOptions(\%options, 'help|h', 'allDisks|a', 'text|t');
+GetOptions(\%options, 'help|h', 'allDisks|a', "ASCII|A", 'text|t');
 if(defined $options{help}){
     print "Odroid Backup program\n
 Usage $0 options
@@ -37,7 +37,7 @@ Options
 --help|-h       Print this message
 --allDisks|-a   Display all disks in the selector (by default only removable disks are shown)
 --text|-t       Force rendering with dialog even if zenity is available
-
+--ASCII|-A	Force rendering with ASCII
 ";
     exit 0;
 }
@@ -790,6 +790,10 @@ sub checkDependencies{
             #force rendering only with dialog
             @ui = ('dialog', 'ascii');
         }
+	if(defined $options{'ASCII'}){
+	    #force rendering only with ascii
+	    @ui = ('ascii');
+	}
         $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, height => 400, order => \@ui, literal => 1 );
         
     }

@@ -781,6 +781,7 @@ sub checkDependencies{
     };
 
     my %toinstall = ();
+    my %cpanToInstall = ();
     
     if($rc){
         # UI::Dialog loaded and imported successfully
@@ -799,7 +800,7 @@ sub checkDependencies{
     }
     else{
         $message .= "UI::Dialog missing...\n";
-        $toinstall{'libui-dialog-perl'} = 1;
+        $cpanToInstall{'UI::Dialog'} = 1;
         $toinstall{'zenity'} = 1;
         $toinstall{'dialog'} = 1;
     }
@@ -834,11 +835,20 @@ sub checkDependencies{
             $toinstall{$dependencies{$program}}=1;
         }
     }
+
     if(scalar keys %toinstall > 0){
         my $packages = join(" ", keys %toinstall);
         $message .= "To install missing dependencies run\n  sudo apt-get install $packages\n";
     }
-    
+
+    #check if CPAN modules are available
+    if(scalar keys %cpanToInstall) {
+        $message .= "To install missing perl modules run\n";
+        foreach my $module (sort keys %cpanToInstall) {
+            $message .= "  sudo perl -MCPAN -e 'install $module'\n";
+        }
+    }
+
     #complain if needed
     if($message ne ''){
         $message = "Odroid Backup needs the following packages to function:\n\n$message";

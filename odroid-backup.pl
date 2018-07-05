@@ -11,19 +11,20 @@ my $dialog;
 my %bin;
 my %options = ();
 my %dependencies = (
-'sfdisk' => 'sfdisk',
-'fsarchiver' => 'fsarchiver',
-'udevadm' => 'udev',
-'blockdev' => 'util-linux',
-'blkid' => 'util-linux',
-'dd' => 'coreutils',
-'partclone.vfat' => 'partclone',
-'partclone.btrfs' => 'partclone',
-'partclone.info' => 'partclone',
-'partclone.restore' => 'partclone',
-'partprobe' => 'parted',
-'flash_erase' => 'mtd-utils',
-'umount' => 'mount',
+    'sfdisk' => 'sfdisk',
+    'fsarchiver' => 'fsarchiver',
+    'udevadm' => 'udev',
+    'blockdev' => 'util-linux',
+    'blkid' => 'util-linux',
+    'dd' => 'coreutils',
+    'partclone.vfat' => 'partclone',
+    'partclone.btrfs' => 'partclone',
+    'partclone.info' => 'partclone',
+    'partclone.restore' => 'partclone',
+    'partprobe' => 'parted',
+    'flash_erase' => 'mtd-utils',
+    'umount' => 'mount',
+    'mount' => 'mount'
 );
 
 my $logfile = '/var/log/odroid-backup.log';
@@ -207,10 +208,20 @@ if($mainOperation eq 'backup'){
                                 #we use partclone
                                 my $partcloneVersion = 'partclone.' . $partitions{$partition}{literalType};
                                 `echo "Using partclone binary: $partcloneVersion" >> $logfile 2>&1`;
-                                `$bin{umount} $partition`; #partition can't be mounted while backing it up (eg. btrfs), so let's un-mount it
+                                if(defined $partitions{$partition}{'mounted'}){
+                                    `echo "Unmounting $partitions{$partition}{'mounted'}..." >> $logfile`;
+                                    `$bin{umount} $partition >> $logfile 2>&1`; #partition can't be mounted while backing it up (eg. btrfs), so let's un-mount it
+                                }
+
                                 `$bin{"$partcloneVersion"} -c -s $partition -o "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;
+
+                                #if the partition was umounted, it's nice to try to mount it back - to prevent other problems
+                                if(defined $partitions{$partition}{'mounted'}){
+                                    `echo "Mounting back $partitions{$partition}{'mounted'} (if it's in fstab)..." >> $logfile`;
+                                    `$bin{mount} $partitions{$partition}{'mounted'} >> $logfile 2>&1`;
+                                }
 
                                 `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
                                 if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {

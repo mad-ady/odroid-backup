@@ -43,7 +43,8 @@ Options
 --restore   Do a restore
 --disk      Disk to backup/restore to (e.g.: sda, sdb, mmcblk0, mmcblk1, etc)
 --partitions List of partitions to backup/restore. Valid names are in this format:
-            bootloader,mbr,/dev/sdd1
+            bootloader,mbr,/dev/sdd1 -- when backuping
+            bootloader,mbr,1 -- when restoring
 --directory Directory to backup to or to restore from
 ";
     exit 0;

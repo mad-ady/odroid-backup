@@ -29,7 +29,7 @@ my %dependencies = (
 
 my $logfile = '/var/log/odroid-backup.log';
 
-GetOptions(\%options, 'help|h', 'allDisks|a', "ASCII|A", 'text|t');
+GetOptions(\%options, 'help|h', 'allDisks|a', "ASCII|A", 'text|t', 'backup', 'restore', 'disk=s', 'partitions=s', 'directory=s');
 if(defined $options{help}){
     print "Odroid Backup program\n
 Usage $0 options
@@ -39,20 +39,60 @@ Options
 --allDisks|-a   Display all disks in the selector (by default only removable disks are shown)
 --text|-t       Force rendering with dialog even if zenity is available
 --ASCII|-A	Force rendering with ASCII
+--backup    Do a backup
+--restore   Do a restore
+--disk      Disk to backup/restore to (e.g.: sda, sdb, mmcblk0, mmcblk1, etc)
+--partitions List of partitions to backup/restore. Valid names are in this format:
+            bootloader,mbr,/dev/sdd1
+--directory Directory to backup to or to restore from
 ";
     exit 0;
 }
+
+#validate the command-line options supplied that have mandatory arguments
+foreach my $switch ('disk','partitions','directory'){
+    if(defined $options{$switch} && $options{$switch} eq ''){
+        die "Command-line option $switch requires an argument";
+    }
+}
+
+#determine if we're going to run only with command-line parameters, or if we need GUI elements as well
+my $cmdlineOnly = 0;
+if((defined $options{backup} || defined $options{restore}) &&
+    defined $options{disk} && defined $options{partitions} && defined $options{directory}){
+    $cmdlineOnly = 1;
+}
+
 checkDependencies();
 checkUser();
 firstTimeWarning();
 
 my $human = Number::Bytes::Human->new(bs => 1024, si => 1);
 
-my $mainOperation = $dialog->radiolist(title => "Odroid Backup - Please select if you want to perform a backup or a restore:", text => "Please select if you want to perform a backup or a restore:", 
-                    list => [   'backup', [ 'Backup partitions', 1],
-                                'restore', [ 'Restore partitions', 0] ]);
-                                
-print "$mainOperation\n";
+my $mainOperation;
+if(defined $options{'backup'} || defined $options{'restore'}){
+    if(defined $options{'backup'}){
+        $mainOperation = 'backup';
+    }
+    if(defined $options{'restore'}){
+        $mainOperation = 'restore';
+    }
+    if(defined $options{'restore'} && defined $options{'backup'}){
+        #this is a problem - be more specific
+        die("Error: Both backup and restore options were specified, which is ambiguous.");
+    }
+
+}
+else {
+    $mainOperation = $dialog->radiolist(title                                               =>
+        "Odroid Backup - Please select if you want to perform a backup or a restore:", text =>
+        "Please select if you want to perform a backup or a restore:",
+        list                                                                                =>
+        [ 'backup', [ 'Backup partitions', 1 ],
+            'restore', [ 'Restore partitions', 0 ] ]);
+
+    print "$mainOperation\n";
+}
 
 my $error = 0;
 
@@ -70,15 +110,37 @@ if($mainOperation eq 'backup'){
     
 #    print Dumper(\@displayedDisks);
     #create a radio dialog for the user to select the desired disk
-    my $selectedDisk = $dialog->radiolist(title => "Odroid backup - Please select the disk you wish to backup", text => "Please select the disk you wish to backup",
+    my $selectedDisk;
+    if(defined $options{'disk'}){
+        #validate if the user option is part of the disks we were going to display
+        my $valid = 0;
+        foreach my $disk (@displayedDisks){
+            if($disk eq $options{'disk'}){
+                $valid = 1;
+                $selectedDisk = $options{'disk'};
+            }
+        }
+        if(!$valid){
+            die "Disk $options{'disk'} is not a valid disk. Valid options are: ".join(" ", sort keys %disks);
+        }
+    }
+    else{
+        $selectedDisk = $dialog->radiolist(title => "Odroid backup - Please select the disk you wish to backup", text => "Please select the disk you wish to backup",
                     list => \@displayedDisks);
+    }
     
-    print $selectedDisk;
+#    print $selectedDisk;
     
     if($selectedDisk){
         if($selectedDisk=~/mtd/){
             #this is a flash device, use dd to back it up
-            my $directory = $dialog->dselect('path' => ".");
+            my $directory;
+            if(defined $options{'directory'}) {
+                $directory = $options{'directory'};
+            }
+            else{
+                 $directory = $dialog->dselect('path' => ".");
+            }
             print $directory;
             if ($directory) {
                 #the directory might not exist. Test if it exists or create it
@@ -96,13 +158,14 @@ if($mainOperation eq 'backup'){
                 `echo "*** MTD $selectedDisk backup size: $size bytes ***" >> $logfile`;
 
                 #show backup status
-                $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                textbox("Odroid Backup status", $logfile);
                 #backup is finished. Program will now exit.
             }
         }
         else {
             #get a list of partitions from the disk and their type
             my %partitions = getPartitions($selectedDisk);
+            print "Listing partitions on disk $selectedDisk...\n";
             print Dumper(\%partitions);
 
             #convert the partitions hash to an array the way checklist expects
@@ -134,26 +197,44 @@ if($mainOperation eq 'backup'){
                 my @content = ($description, 1);
                 push @displayedPartitions, \@content;
             }
-
-            #create a checkbox selector that allows users to select what they want to backup
-            my @selectedPartitions = $dialog->checklist(title                            =>
-                "Odroid backup - Please select the partitions you want to back-up", text =>
-                "Please select the partitions you want to back-up",
-                list                                                                     => \@displayedPartitions);
-
+            my @selectedPartitions;
+            if(defined $options{'partitions'}){
+                #partitions should be a comma separated list - convert it to array
+                @selectedPartitions = split(',', $options{'partitions'});
+                #validate that the names proposed exist in the partition list to be displayed
+                foreach my $partition (@selectedPartitions){
+                    if(!defined $partitions{$partition}){
+                        #the user selection is wrong
+                        die "Partition $partition is not a valid selection. Valid options are: ". join(", ", sort keys %partitions);
+                    }
+                }
+            }
+            else {
+                #create a checkbox selector that allows users to select what they want to backup
+                @selectedPartitions = $dialog->checklist(title                            =>
+                    "Odroid backup - Please select the partitions you want to back-up", text =>
+                    "Please select the partitions you want to back-up",
+                    list                                                                     => \@displayedPartitions);
+            }
             #fix an extra "$" being appended to the selected element sometimes by zenity
-            print "Partition list after select box: " . join(",", @selectedPartitions);
+#            print "Partition list after select box: " . join(",", @selectedPartitions);
             for (my $i = 0; $i < scalar(@selectedPartitions); $i++) {
                 if ($selectedPartitions[$i] =~ /\$$/) {
                     $selectedPartitions[$i] =~ s/\$$//g;
                 }
             }
-            print "Partition list after cleanup" . join(",", @selectedPartitions);
+            print "Using partition list: " . join(",", @selectedPartitions)."\n";
 
             if (scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0') {
                 #select a destination directory to dump to
-                my $directory = $dialog->dselect('path' => ".");
-                print $directory;
+                my $directory;
+                if(defined $options{'directory'}) {
+                    $directory = $options{'directory'};
+                }
+                else {
+                    $directory = $dialog->dselect('path' => ".");
+                }
+#                print $directory;
                 if ($directory) {
                     #the directory might not exist. Test if it exists or create it
                     if (!-d "$directory") {
@@ -168,11 +249,12 @@ if($mainOperation eq 'backup'){
                     foreach my $partition (reverse @selectedPartitions) {
                         #log something
                         `echo "*** Starting to backup $partition ***" >> $logfile`;
-
-                        #if the backend supports it, display a simple progress bar
-                        if ($dialog->{'_ui_dialog'}->can('gauge_start')) {
-                            $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text =>
-                                "Performing backup...", percentage     => 1);
+                        if(!$cmdlineOnly) {
+                            #if the backend supports it, display a simple progress bar
+                            if ($dialog->{'_ui_dialog'}->can('gauge_start')) {
+                                $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text =>
+                                    "Performing backup...", percentage     => 1);
+                            }
                         }
                         if ($partition eq 'mbr') {
                             #we use sfdisk to dump mbr + ebr
@@ -181,9 +263,11 @@ if($mainOperation eq 'backup'){
                             `echo "Error code: $error" >> $logfile 2>&1`;
 
                             `cat '$directory/partition_table.txt' >> $logfile 2>&1`;
-                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
+                            if(!$cmdlineOnly) {
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
                             }
                         }
                         elsif ($partition eq 'bootloader') {
@@ -194,9 +278,11 @@ if($mainOperation eq 'backup'){
 
                             my $size = -s "$directory/bootloader.bin";
                             `echo "*** Bootloader backup size: $size bytes ***" >> $logfile`;
-                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
+                            if(!$cmdlineOnly) {
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
                             }
                         }
                         else {
@@ -224,9 +310,12 @@ if($mainOperation eq 'backup'){
                                 }
 
                                 `$bin{'partclone.info'} -s "$directory/partition_${partitionNumber}.img" >> $logfile 2>&1`;
-                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                             elsif ($partitions{$partition}{literalType} =~ /ext[234]/) {
@@ -236,55 +325,66 @@ if($mainOperation eq 'backup'){
                                 `echo "Error code: $error" >> $logfile 2>&1`;
 
                                 `$bin{'fsarchiver'} archinfo "$directory/partition_${partitionNumber}.fsa" >> $logfile 2>&1`;
-                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                             else {
                                 #not supported filesystem type!
-                                $dialog->msgbox(title => "Odroid Backup error", text =>
-                                    "The partition $partition has a non-supported filesystem. Backup will skip it");
+                                messagebox("Odroid Backup error", "The partition $partition has a non-supported filesystem. Backup will skip it");
                                 `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
 
-                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                         }
                     }
 
-                    #finalize progress bar
-                    if ($dialog->{'_ui_dialog'}->can('gauge_set')) {
-                        $dialog->{'_ui_dialog'}->gauge_set(100);
-                        #sleep 5;
+                    if(!$cmdlineOnly) {
+                        #finalize progress bar
+                        if ($dialog->{'_ui_dialog'}->can('gauge_set')) {
+                            $dialog->{'_ui_dialog'}->gauge_set(100);
+                            #sleep 5;
+                        }
                     }
 
                     #show backup status
-                    $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                    textbox("Odroid Backup status", $logfile);
                     #backup is finished. Program will now exit.
                 }
                 else {
-                    $dialog->msgbox(title => "Odroid Backup error", text =>
-                        "No destination selected for backup. Program will close");
+                    messagebox("Odroid Backup error", "No destination selected for backup. Program will close");
                 }
             }
             else {
-                $dialog->msgbox(title => "Odroid Backup error", text =>
-                    "No partitions selected for backup. Program will close");
+                messagebox("Odroid Backup error", "No partitions selected for backup. Program will close");
             }
         }
         
     }
     else{
-            $dialog->msgbox(title => "Odroid Backup error", text => "No disks selected for backup. Program will close");
+            messagebox("Odroid Backup error", "No disks selected for backup. Program will close");
     }
 }
 if($mainOperation eq 'restore'){
     #select source directory
-    my $directory = $dialog->dselect(title => "Odroid backup - Please select the directory holding your backup", text => "Please select the directory holding your backup", 'path' => ".");
-    print $directory;
+    my $directory;
+    if(defined $options{'directory'}) {
+        $directory = $options{'directory'};
+    }
+    else {
+        $directory = $dialog->dselect(title => "Odroid backup - Please select the directory holding your backup", text
+                                            => "Please select the directory holding your backup", 'path' => ".");
+    }
+#    print $directory;
     if($directory){
         #check that there are files we recognize and can restore
         opendir ( DIR, $directory ) || die "Error in opening dir $directory\n";
@@ -369,10 +469,10 @@ if($mainOperation eq 'restore'){
                 else{
                     #silently skip non-matching flash sizes
                 }
-
             }
         }
         closedir(DIR);
+        print "Read the following restorable data from the archive directory:\n";
         print Dumper(\%partitions);
         
         #select what to restore
@@ -394,19 +494,34 @@ if($mainOperation eq 'restore'){
                 my @content =  ( $description, 1 );
                 push @displayedPartitions, \@content;
             }
-            
-            #create a checkbox selector that allows users to select what they want to backup
-            my @selectedPartitions = $dialog->checklist(title => "Odroid backup - Please select the partitions you want to restore", text => "Please select the partitions you want to restore",
-                        list => \@displayedPartitions);
-
+            my @selectedPartitions;
+            if(defined $options{'partitions'}){
+                #partitions should be a comma separated list - convert it to array
+                @selectedPartitions = split(',', $options{'partitions'});
+                #validate that the names proposed exist in the partition list to be displayed
+                foreach my $partition (@selectedPartitions){
+                    if(!defined $partitions{$partition}){
+                        #the user selection is wrong
+                        die "Partition $partition is not a valid selection. Valid options are: ". join(", ", sort keys %partitions);
+                    }
+                }
+            }
+            else {
+                #create a checkbox selector that allows users to select what they want to backup
+                @selectedPartitions = $dialog->checklist(title                            =>
+                    "Odroid backup - Please select the partitions you want to restore", text =>
+                    "Please select the partitions you want to restore",
+                    list                                                                     => \@displayedPartitions);
+            }
             #fix an extra "$" being appended to the selected element sometimes by zenity
-       	    print "Partition list after select box: ". join(",", @selectedPartitions);
+       	    #print "Partition list after select box: ". join(",", @selectedPartitions);
             for (my $i=0; $i<scalar(@selectedPartitions); $i++){
                if($selectedPartitions[$i]=~/\$$/){
                        $selectedPartitions[$i]=~s/\$$//g;
                }
             }
-            print "Partition list after cleanup". join(",", @selectedPartitions);
+            print "Selected to restore the following partitions: ". join(",", @selectedPartitions)."\n";
+
             
             if(scalar(@selectedPartitions) > 0 && $selectedPartitions[0] ne '0'){
                 #convert selectedPartitions to a hash for simpler lookup
@@ -429,10 +544,28 @@ if($mainOperation eq 'restore'){
                 
             #    print Dumper(\@displayedDisks);
                 #create a radio dialog for the user to select the desired disk
-                my $selectedDisk = $dialog->radiolist(title => "Odroid backup - Please select the disk you wish to restore to. Only the selected partitions will be restored.", text => "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
-                                list => \@displayedDisks);
-                
-                print "Selected disk is: $selectedDisk\n";
+                my $selectedDisk;
+                if(defined $options{'disk'}){
+                    #validate if the user option is part of the disks we were going to display
+                    my $valid = 0;
+                    foreach my $disk (@displayedDisks){
+                        if($disk eq $options{'disk'}){
+                            $valid = 1;
+                            $selectedDisk = $options{'disk'};
+                        }
+                    }
+                    if(!$valid){
+                        die "Disk $options{'disk'} is not a valid disk. Valid options are: ".join(" ", sort keys %disks);
+                    }
+                }
+                else {
+                    my $selectedDisk = $dialog->radiolist(title =>
+                        "Odroid backup - Please select the disk you wish to restore to. Only the selected partitions will be restored.",
+                        text                                    =>
+                        "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
+                        list                                    => \@displayedDisks);
+                }
+                print "Selected disk to restore to is: $selectedDisk\n";
                 
                 if($selectedDisk){
                     #Check that the selectedDisk doesn't have mounted partitions anywhere
@@ -452,16 +585,19 @@ if($mainOperation eq 'restore'){
                     }
                     
                     if(defined $mountError){
-                        $dialog->msgbox(title => "Odroid Backup error", text => "There are mounted filesystems on the target device. $mountError Restore will abort.");
+                        messagebox("Odroid Backup error", "There are mounted filesystems on the target device. $mountError Restore will abort.");
                         exit;
                     }
                     #perform restore
                     #truncate log
                     `echo "Starting restore process" > $logfile`;
-                    
-                    #if the backend supports it, display a simple progress bar
-                    if($dialog->{'_ui_dialog'}->can('gauge_start')){
-                        $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text => "Performing restore...", percentage => 1);
+
+                    if(!$cmdlineOnly) {
+                        #if the backend supports it, display a simple progress bar
+                        if ($dialog->{'_ui_dialog'}->can('gauge_start')) {
+                            $dialog->{'_ui_dialog'}->gauge_start(title => "Odroid Backup", text =>
+                                "Performing restore...", percentage    => 1);
+                        }
                     }
                     
                     #restore MBR first
@@ -472,16 +608,16 @@ if($mainOperation eq 'restore'){
                         $error = $? >> 8;
                         `echo "Error code: $error" >> $logfile 2>&1`;
 
-                        #`cat '$directory/partition_table.txt' >> $logfile 2>&1`;
-                        
                         #force the kernel to reread the new partition table
                         `$bin{partprobe} -s /dev/$selectedDisk >> $logfile 2>&1`;
                         
                         sleep 2;
-                        
-                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                            #sleep 5;
+
+                        if(!$cmdlineOnly) {
+                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                #sleep 5;
+                            }
                         }
                     }
                     #restore Bootloader second
@@ -499,10 +635,11 @@ if($mainOperation eq 'restore'){
                         $error = $? >> 8;
                         `echo "Error code: $error" >> $logfile 2>&1`;
 
-                        
-                        if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                            $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                            #sleep 5;
+                        if(!$cmdlineOnly) {
+                            if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                #sleep 5;
+                            }
                         }
                     }
 
@@ -522,9 +659,11 @@ if($mainOperation eq 'restore'){
                             $error = $? >> 8;
                             `echo "Error code: $error" >> $logfile 2>&1`;
 
-                            if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                #sleep 5;
+                            if(!$cmdlineOnly) {
+                                if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                    #sleep 5;
+                                }
                             }
                         }
                     }
@@ -556,9 +695,11 @@ if($mainOperation eq 'restore'){
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;
 
-                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                             elsif($partitions{$partition}{literalType} =~/ext[234]/i){
@@ -567,9 +708,11 @@ if($mainOperation eq 'restore'){
                                 $error = $? >> 8;
                                 `echo "Error code: $error" >> $logfile 2>&1`;
 
-                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                             elsif($partitions{$partition}{type} eq '5'){
@@ -577,40 +720,41 @@ if($mainOperation eq 'restore'){
                             }
                             else{
                                 #not supported filesystem type!
-                                $dialog->msgbox(title => "Odroid Backup error", text => "The partition $partition has a non-supported filesystem. Restore will skip it");
+                                messagebox("Odroid Backup error", "The partition $partition has a non-supported filesystem. Restore will skip it");
                                 `echo "*** Skipping partition $partition because it has an unsupported type ($partitions{$partition}{literalType}) ***" >> $logfile`;
-                                
-                                if($dialog->{'_ui_dialog'}->can('gauge_inc')){
-                                    $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
-                                    #sleep 5;
+
+                                if(!$cmdlineOnly) {
+                                    if ($dialog->{'_ui_dialog'}->can('gauge_inc')) {
+                                        $dialog->{'_ui_dialog'}->gauge_inc($progressStep);
+                                        #sleep 5;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                
-                #finalize progress bar
-                if($dialog->{'_ui_dialog'}->can('gauge_set')){
-                    $dialog->{'_ui_dialog'}->gauge_set(100);
-                    #sleep 5;
+
+                if(!$cmdlineOnly) {
+                    #finalize progress bar
+                    if ($dialog->{'_ui_dialog'}->can('gauge_set')) {
+                        $dialog->{'_ui_dialog'}->gauge_set(100);
+                        #sleep 5;
+                    }
                 }
                 
                 #show backup status
-                $dialog->textbox(title => "Odroid Backup status", path => $logfile);
+                textbox("Odroid Backup status", $logfile);
                 #restore is finished. Program will now exit.
             }
             else{
-                $dialog->msgbox(title => "Odroid Backup error", text => "No partitions selected for restore. Program will close");
+                messagebox("Odroid Backup error", "No partitions selected for restore. Program will close");
             }
         }
         else{
             #we found nothing useful in the backup dir
-            $dialog->msgbox(title => "Odroid Backup error", text => "No backups found in $directory. Program will close");
+            messagebox("Odroid Backup error", "No backups found in $directory. Program will close");
         }
     }
-    
-    
-    
 }
 
 sub getPartitions{
@@ -707,8 +851,8 @@ sub getRemovableDisks{
     while (readdir $dh) {
         my $block = $_;
         next if ($block eq '.' || $block eq '..');
-        print "/sys/block/$block\n";
-        my @info = `$bin{udevadm} info -a --path=/sys/block/$block`;
+#        print "/sys/block/$block\n";
+        my @info = `$bin{udevadm} info -a --path=/sys/block/$block 2>/dev/null`;
         my $removable = 0;
         my $model = "";
         foreach my $line (@info){
@@ -729,7 +873,7 @@ sub getRemovableDisks{
             $disks{$block}{removable} = $removable;
             
         }
-        print "$block\t$model\t$removable\n";
+#        print "$block\t$model\t$removable\n";
     }
     # Also look for NAND flash and show it as a disk
     if(open NAND, "/proc/mtd"){
@@ -754,8 +898,8 @@ sub getRemovableDisks{
 sub getDiskSize{
     my $disk = shift;
     $disk = "/dev/$disk" if($disk !~ /^\/dev\//);
-    print Dumper(\$disk);
-    my $size = `$bin{blockdev} --getsize64 $disk`;
+#    print Dumper(\$disk);
+    my $size = `$bin{blockdev} --getsize64 $disk 2>/dev/null`;
     $size=~s/\r|\n//g;
     return $size;
 }
@@ -763,7 +907,7 @@ sub getDiskSize{
 sub checkUser{
     if($< != 0){
         #needs to run as root
-        $dialog->msgbox(title => "Odroid Backup error", text => "You need to run this program as root");
+        messagebox("Odroid Backup error", "You need to run this program as root");
         exit 2;
     }
 }
@@ -773,47 +917,77 @@ sub firstTimeWarning{
     my $homedir = (getpwuid $>)[7];
     if(! -f $homedir."/.odroid-backup"){
         #running the first time
-        $dialog->msgbox(title => "Odroid Backup warning", text => "WARNING: This script attempts to backup and restore eMMCs and SD cards for Odroid systems. It should work with other systems as well, but it was not tested. Since restore can be a dangerous activity take the time to understand what's going on and make sure you're not destroying valuable data. It is wise to test a backup after it was made (image it to a different card and try to boot the system) in order to rule out backup errors. When backup or restore completes you will be presented with a log of what happened. It is wise to review the log, since not all errors are caught by this script (actually none is treated). I am not responsible for corrupted backups, impossible to restore backups, premature baldness or World War 3. This is your only warning! Good luck!");
+        messagebox("Odroid Backup warning", "WARNING: This script attempts to backup and restore eMMCs and SD cards for Odroid systems. It should work with other systems as well, but it was not tested. Since restore can be a dangerous activity take the time to understand what's going on and make sure you're not destroying valuable data. It is wise to test a backup after it was made (image it to a different card and try to boot the system) in order to rule out backup errors. When backup or restore completes you will be presented with a log of what happened. It is wise to review the log, since not all errors are caught by this script (actually none is treated). I am not responsible for corrupted backups, impossible to restore backups, premature baldness or World War 3. This is your only warning! Good luck!");
         
         #create a file in the user's homedir so that we remember he's been warned
         open FILE, ">$homedir/.odroid-backup" or die "Unable to write $homedir/.odroid-backup";
         close FILE;
     }
 }
+
+sub messagebox{
+    my $title = shift;
+    my $text = shift;
+    if($cmdlineOnly){
+        print "$title: $text\n";
+    }
+    else {
+        $dialog->msgbox(title => $title, text => $text);
+    }
+}
+
+sub textbox{
+    my $title = shift;
+    my $file = shift;
+    if($cmdlineOnly){
+        print "$title:\n";
+        print `cat "$file"`;
+        print "\n";
+    }
+    else {
+        $dialog->textbox(title => $title, path => $file);
+    }
+}
+
 sub checkDependencies{
     #check for sfdisk, partclone, fsarchiver and perl modules
     
     my $message = "";
-    
-    #check if UI::Dialog is available...
-    my $rc = eval{
-        require UI::Dialog;
-        1;
-    };
+    my $rc = 0;
+    if(!$cmdlineOnly) {
+        #check if UI::Dialog is available...
+        $rc = eval {
+            require UI::Dialog;
+            1;
+        };
+    }
 
     my %toinstall = ();
     my %cpanToInstall = ();
-    
-    if($rc){
-        # UI::Dialog loaded and imported successfully
-        # initialize it and display errors via UI
-        my @ui = ('zenity', 'dialog', 'ascii');
-        if(defined $options{'text'}){
-            #force rendering only with dialog
-            @ui = ('dialog', 'ascii');
+
+    if(!$cmdlineOnly) {
+        if ($rc) {
+            # UI::Dialog loaded and imported successfully
+            # initialize it and display errors via UI
+            my @ui = ('zenity', 'dialog', 'ascii');
+            if (defined $options{'text'}) {
+                #force rendering only with dialog
+                @ui = ('dialog', 'ascii');
+            }
+            if (defined $options{'ASCII'}) {
+                #force rendering only with ascii
+                @ui = ('ascii');
+            }
+            $dialog = new UI::Dialog (backtitle => "Odroid Backup", debug => 0, width => 400, height => 400,
+                                        order => \@ui, literal => 1);
+
         }
-	if(defined $options{'ASCII'}){
-	    #force rendering only with ascii
-	    @ui = ('ascii');
-	}
-        $dialog = new UI::Dialog ( backtitle => "Odroid Backup", debug => 0, width => 400, height => 400, order => \@ui, literal => 1 );
-        
-    }
-    else{
-        $message .= "UI::Dialog missing...\n";
-        $cpanToInstall{'UI::Dialog'} = 1;
-        $toinstall{'zenity'} = 1;
-        $toinstall{'dialog'} = 1;
+        else {
+            $message .= "UI::Dialog missing...\n";
+            $cpanToInstall{'UI::Dialog'} = 1;
+            $toinstall{'zenity'} = 1;
+            $toinstall{'dialog'} = 1;
+        }
     }
     
     #check if other perl modules are available
@@ -863,13 +1037,8 @@ sub checkDependencies{
     #complain if needed
     if($message ne ''){
         $message = "Odroid Backup needs the following packages to function:\n\n$message";
-        
-        if($rc){
-            $dialog->msgbox(title => "Odroid Backup error", text => $message);
-        }
-        else{
-            print $message;
-        }
+
+        messagebox("Odroid Backup error", $message);
         exit 1;
     }
 }

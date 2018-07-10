@@ -690,7 +690,7 @@ if($mainOperation eq 'restore'){
                                 $partitionDev = $selectedDisk.$partitionNumber;
                             }
                             
-                            if($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'btrfs' || $partitions{$partition}{literalType} eq 'FAT16' || $partitions{$partition}{literalType} eq 'FAT32'){
+                            if($partitions{$partition}{literalType} eq 'vfat' || $partitions{$partition}{literalType} eq 'btrfs' || $partitions{$partition}{literalType} eq 'BTRFS' || $partitions{$partition}{literalType} eq 'FAT16' || $partitions{$partition}{literalType} eq 'FAT32'){
                                 #we use partclone
                                 `$bin{'partclone.restore'} -s '$partitions{$partitionNumber}{filename}' -o '/dev/$partitionDev' >> $logfile 2>&1`;
                                 $error = $? >> 8;

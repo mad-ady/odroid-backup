@@ -9,7 +9,7 @@ $ sudo chmod a+x /usr/local/bin/odroid-backup.pl
 
 The script depends on a bunch of non-standard perl modules and some linux utilities and will display a list of missing dependencies and ways of fixing it when you first run it. To install all dependencies at once run the following:
 ```
-$ sudo apt-get install zenity dialog libnumber-bytes-human-perl libjson-perl fsarchiver udev util-linux coreutils partclone parted
+$ sudo apt-get install zenity dialog libnumber-bytes-human-perl libjson-perl fsarchiver udev util-linux coreutils partclone parted mtd-utils
 $ sudo perl -MCPAN -e 'install UI::Dialog'
 ```
 The script is designed to run on linux systems - either a PC to which you've hooked up a SD/eMMC through a reader, or directly on the Odroid - sorry Windows fans… Also, the script will create graphical windows if it detects you're running an X11 session, or will fall back to ncurses (display) if you're connected via ssh or terminal (you can manually force this with --text switch).

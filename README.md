@@ -17,12 +17,25 @@ The script is designed to run on linux systems - either a PC to which you've hoo
 ![alt text](http://imgur.com/m3Pr1NM.png)
 > Figure 1. Zenity vs display rendering
 
-To perform a backup, start the tool in a terminal (```sudo odroid-backup.pl```) and select "Backup partitions", select OK (1). You will be presented with a list of removable drives in your system (you can start the program with -a to display all drives - this is the case when running directly on the Odroid, since eMMC and SD are shown as non-removable). Select the desired one and click OK (2). You will then be presented with a list of partitions on that drive. Select the ones you wish to back up (3). Next you will have to select a directory where to save the backups. It's best to have a clean directory (4). Press OK and backup will start (you have a rudimentary progress bar to keep you company) (5). When backup is done you will be presented with a status window with the backup results (and possible errors) (6). The backup files have the same naming convention used in this article.
+To perform a backup, start the tool in a terminal (```sudo odroid-backup.pl```) and select "Backup partitions", select OK 
+
+* (1) You will be presented with a list of removable drives in your system (you can start the program with -a to display all drives - this is the case when running directly on the Odroid, since eMMC and SD are shown as non-removable). Select the desired one and click OK 
+* (2) You will then be presented with a list of partitions on that drive. Select the ones you wish to back up 
+* (3) Next you will have to select a directory where to save the backups. It's best to have a clean directory 
+* (4) Press OK and backup will start (you have a rudimentary progress bar to keep you company) 
+* (5) When backup is done you will be presented with a status window with the backup results (and possible errors) 
+* (6) The backup files have the same naming convention used in this article.
 
 ![alt text](http://imgur.com/To75WZ8.png)
 > Figure 2. Backup steps
 
-To perform a restore, start the tool in a terminal (sudo odroid-backup.pl) and select "Restore partitions" and select OK (1). You will have to select the directory holding your precious backups and select OK (2). In the resulting window select which partitions you wish to restore from the backup and select OK (3). Note that the partitions are restored in the same order as they were on the original disk - meaning partition 1 will be the first partition and so on. In the last window you will be asked on which drive to restore the data (4). Enjoy your time watching the progress bar progressing (5) and in the end you will have a status window with the restore results (6). The log file is also saved in /var/log/odroid-backup.log.
+To perform a restore, start the tool in a terminal (sudo odroid-backup.pl) and select "Restore partitions" and select OK 
+* (1) You will have to select the directory holding your precious backups and select OK 
+* (2) In the resulting window select which partitions you wish to restore from the backup and select OK 
+* (3) Note that the partitions are restored in the same order as they were on the original disk - meaning partition 1 will be the first partition and so on. In the last window you will be asked on which drive to restore the data 
+* (4) Enjoy your time watching the progress bar progressing 
+* (5) and in the end you will have a status window with the restore results 
+* (6) The log file is also saved in /var/log/odroid-backup.log.
 
 ![alt text](http://imgur.com/ZAbkngJ.png)
 > Figure 3. Restore steps

@@ -92,10 +92,14 @@ else {
         [ 'backup', [ 'Backup partitions', 1 ],
             'restore', [ 'Restore partitions', 0 ] ]);
 
-    print "$mainOperation\n";
+    print "MainOperation:$mainOperation\n";
 }
 
 my $error = 0;
+
+if($mainOperation eq '0'){
+    die "Unable to display window for selection. Try running with --text";
+}
 
 if($mainOperation eq 'backup'){
     #get a list of removable drives (or all drives if so desired)
@@ -955,19 +959,24 @@ sub checkDependencies{
     
     my $message = "";
     my $rc = 0;
+    my $evalError = "";
     if(!$cmdlineOnly) {
         #check if UI::Dialog is available...
         $rc = eval {
             require UI::Dialog;
             1;
         };
+        if(! defined $rc){
+            $evalError = $@;
+            print "$evalError\n";
+        }
     }
-
+    print "DBG: rc=$rc\n";
     my %toinstall = ();
     my %cpanToInstall = ();
 
     if(!$cmdlineOnly) {
-        if ($rc) {
+        if (defined $rc) {
             # UI::Dialog loaded and imported successfully
             # initialize it and display errors via UI
             my @ui = ('zenity', 'dialog', 'ascii');
@@ -981,7 +990,7 @@ sub checkDependencies{
             }
             $dialog = new UI::Dialog (backtitle => "Odroid Backup", debug => 0, width => 400, height => 400,
                                         order => \@ui, literal => 1);
-
+            print "DBG: dialog: $dialog\n";
         }
         else {
             $message .= "UI::Dialog missing...\n";

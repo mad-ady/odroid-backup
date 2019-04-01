@@ -366,7 +366,7 @@ if($mainOperation eq 'backup'){
                     #backup is finished. Program will now exit.
                 }
                 else {
-                    messagebox("Odroid Backup error", "No destination selected for backup. Program will close");
+                    messagebox("Odroid Backup error", "Unrecognized directory. Try running the command with --directory /path/to/directory");
                 }
             }
             else {
@@ -759,6 +759,9 @@ if($mainOperation eq 'restore'){
             #we found nothing useful in the backup dir
             messagebox("Odroid Backup error", "No backups found in $directory. Program will close");
         }
+    }
+    else{
+        messagebox("Odroid Backup error", "Unrecognized directory. Try running the command with --directory /path/to/directory");
     }
 }
 

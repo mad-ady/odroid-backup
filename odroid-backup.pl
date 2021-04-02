@@ -564,7 +564,7 @@ if($mainOperation eq 'restore'){
                     }
                 }
                 else {
-                    my $selectedDisk = $dialog->radiolist(title =>
+                    $selectedDisk = $dialog->radiolist(title =>
                         "Odroid backup - Please select the disk you wish to restore to. Only the selected partitions will be restored.",
                         text                                    =>
                         "Please select the disk you wish to restore to. Only the selected partitions will be restored.",
